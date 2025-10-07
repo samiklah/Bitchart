@@ -132,6 +132,13 @@ export class Scales {
     return shift < 0 ? shift + s : shift;
   }
 
+  screenXToDataIndex(screenX: number): number {
+    const vr = this.getVisibleRange();
+    const s = this.scaledSpacing();
+    const relativeX = screenX - this.margin.left + this.xShift - s / 2;
+    return vr.startIndex + Math.floor(relativeX / s);
+  }
+
   private get ladderTop(): number {
     if (this.data.length === 0) return 10000;
     return Math.ceil(Math.max(...this.data.map(c => c.high)) / this.TICK) * this.TICK + 10 * this.TICK;

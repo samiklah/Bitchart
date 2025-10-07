@@ -9,6 +9,8 @@ export declare class Drawing {
     private showBounds;
     private scales;
     private theme;
+    private crosshair;
+    private lastPrice;
     constructor(ctx: CanvasRenderingContext2D, data: CandleData[], margin: {
         top: number;
         bottom: number;
@@ -19,11 +21,17 @@ export declare class Drawing {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, showGrid: boolean, showBounds: boolean, scales: Scales, theme: VFCTheme);
+    }, showGrid: boolean, showBounds: boolean, scales: Scales, theme: VFCTheme, crosshair: {
+        x: number;
+        y: number;
+        visible: boolean;
+    }, lastPrice: number | null);
     drawAll(): void;
     private drawGrid;
     private drawChart;
     private drawScales;
     private drawBounds;
     private drawFootprint;
+    private drawCrosshair;
+    private drawCurrentPriceLabel;
 }

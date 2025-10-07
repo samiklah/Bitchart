@@ -4,6 +4,7 @@ export declare class Interactions {
     private margin;
     private view;
     private events;
+    private crosshair;
     private momentum;
     private readonly PAN_INVERT;
     constructor(canvas: HTMLCanvasElement, margin: {
@@ -16,10 +17,17 @@ export declare class Interactions {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, events: VFCEvents);
+    }, events: VFCEvents, crosshair: {
+        x: number;
+        y: number;
+        visible: boolean;
+    });
     handleWheel(e: WheelEvent): void;
     handlePointerDown(e: PointerEvent): void;
     private cancelMomentum;
     private startMomentum;
     private stepMomentum;
+    private setupMouseTracking;
+    private handleMouseMove;
+    private handleMouseLeave;
 }

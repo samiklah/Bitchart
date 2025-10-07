@@ -76,6 +76,7 @@ export interface VFCOptions {
 export interface VFCEvents {
   onZoom?: (zoomX: number, zoomY: number) => void;
   onPan?: (offsetX: number, offsetRows: number) => void;
+  onMouseMove?: (x: number, y: number, visible: boolean) => void;
 }
 
 export interface VFCEvents {

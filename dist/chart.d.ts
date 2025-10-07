@@ -9,6 +9,8 @@ export declare class Chart {
     private view;
     private showGrid;
     private showBounds;
+    private crosshair;
+    private lastPrice;
     private readonly TICK;
     private readonly BASE_CANDLE;
     private readonly BASE_BOX;

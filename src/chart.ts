@@ -15,6 +15,8 @@ export class Chart {
   private view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
   private showGrid = true;
   private showBounds = false;
+  private crosshair = { x: -1, y: -1, visible: false };
+  private lastPrice: number | null = null;
 
   // Constants
   private readonly TICK = 10;
@@ -81,8 +83,10 @@ export class Chart {
       {
         ...this.events,
         onPan: () => this.drawing.drawAll(),
-        onZoom: () => this.drawing.drawAll()
-      }
+        onZoom: () => this.drawing.drawAll(),
+        onMouseMove: () => this.drawing.drawAll()
+      },
+      this.crosshair
     );
 
     this.drawing = new Drawing(
@@ -93,7 +97,9 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.scales,
-      this.options.theme
+      this.options.theme,
+      this.crosshair,
+      this.lastPrice
     );
 
     this.setupCanvas();
@@ -139,6 +145,13 @@ export class Chart {
   // Public API
   public setData(data: CandleData[]) {
     this.data = data;
+    
+    // Calculate lastPrice first, before creating Drawing instance
+    if (data.length > 0) {
+        const lastPrice = data[data.length - 1].close;
+        this.lastPrice = lastPrice;
+    }
+    
     // Update scales with new data
     this.scales = new Scales(
       this.data,
@@ -150,6 +163,7 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS
     );
+    
     this.drawing = new Drawing(
       this.ctx,
       this.data,
@@ -158,21 +172,23 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.scales,
-      this.options.theme
+      this.options.theme,
+      this.crosshair,
+      this.lastPrice  // Now has the correct value
     );
 
     // Set initial view to show the end of the chart (latest data) and center the last price vertically
     if (data.length > 0) {
-      const s = this.scales.scaledSpacing();
-      const contentW = this.options.width - this.margin.left - this.margin.right;
-      const visibleCount = Math.ceil(contentW / s);
-      const startIndex = Math.max(0, data.length - visibleCount);
-      this.view.offsetX = startIndex * s;
-      // Center the last candle's close price vertically
-      const lastPrice = data[data.length - 1].close;
-      const totalRows = Math.floor(this.scales.chartHeight() / this.scales.rowHeightPx());
-      const centerRow = totalRows / 2;
-      this.view.offsetRows = centerRow - (this.scales.priceToRowIndex(lastPrice) - centerRow);
+        const s = this.scales.scaledSpacing();
+        const contentW = this.options.width - this.margin.left - this.margin.right;
+        const visibleCount = Math.ceil(contentW / s);
+        const startIndex = Math.max(0, data.length - visibleCount);
+        this.view.offsetX = startIndex * s;
+        // Center the last candle's close price vertically
+        const lastPrice = this.lastPrice!; // We know it's not null at this point
+        const totalRows = Math.floor(this.scales.chartHeight() / this.scales.rowHeightPx());
+        const centerRow = totalRows / 2;
+        this.view.offsetRows = centerRow - (this.scales.priceToRowIndex(lastPrice) - centerRow);
     }
     this.drawing.drawAll();
   }

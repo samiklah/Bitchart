@@ -10,6 +10,8 @@ export class Drawing {
   private showBounds: boolean;
   private scales: Scales;
   private theme: VFCTheme;
+  private crosshair: { x: number; y: number; visible: boolean };
+  private lastPrice: number | null;
 
   constructor(
     ctx: CanvasRenderingContext2D,
@@ -19,7 +21,9 @@ export class Drawing {
     showGrid: boolean,
     showBounds: boolean,
     scales: Scales,
-    theme: VFCTheme
+    theme: VFCTheme,
+    crosshair: { x: number; y: number; visible: boolean },
+    lastPrice: number | null
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -29,6 +33,8 @@ export class Drawing {
     this.showBounds = showBounds;
     this.scales = scales;
     this.theme = theme;
+    this.crosshair = crosshair;
+    this.lastPrice = lastPrice;
   }
 
   drawAll(): void {
@@ -38,6 +44,8 @@ export class Drawing {
     if (this.showGrid) this.drawGrid();
     this.drawChart();
     this.drawScales();
+    this.drawCurrentPriceLabel();
+    if (this.crosshair.visible) this.drawCrosshair();
     if (this.showBounds) this.drawBounds();
   }
 
@@ -348,5 +356,118 @@ export class Drawing {
     this.ctx.stroke();
     this.ctx.fillStyle = color;
     this.ctx.fillRect(cx - half, Math.min(yOpen, yClose), this.scales.scaledCandle(), Math.abs(yClose - yOpen));
+  }
+
+
+  private drawCrosshair(): void {
+    if (!this.crosshair.visible) return;
+
+    const width = this.ctx.canvas.width / window.devicePixelRatio;
+    const height = this.ctx.canvas.height / window.devicePixelRatio;
+    const chartRight = width - this.margin.right;
+    const yBottom = this.margin.top + this.scales.chartHeight();
+
+    this.ctx.save();
+
+    // Draw vertical line
+    this.ctx.strokeStyle = this.theme.textColor || '#aaa';
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash([2, 2]);
+    this.ctx.beginPath();
+    this.ctx.moveTo(this.crosshair.x, this.margin.top);
+    this.ctx.lineTo(this.crosshair.x, yBottom);
+    this.ctx.stroke();
+
+    // Draw horizontal line
+    this.ctx.beginPath();
+    this.ctx.moveTo(this.margin.left, this.crosshair.y);
+    this.ctx.lineTo(chartRight, this.crosshair.y);
+    this.ctx.stroke();
+
+    // Draw price label on right side
+    const price = this.scales.rowIndexToPrice(
+      (this.crosshair.y - this.margin.top) / this.scales.rowHeightPx() + this.view.offsetRows
+    );
+    this.ctx.setLineDash([]);
+    this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+    this.ctx.fillRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
+    this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+    this.ctx.strokeRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
+    this.ctx.fillStyle = this.theme.textColor || '#aaa';
+    this.ctx.font = '11px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(price.toFixed(2), chartRight + this.margin.right / 2, this.crosshair.y);
+
+    // Draw time label on bottom
+    const index = this.scales.screenXToDataIndex(this.crosshair.x);
+    let timeStr = '--:--';
+    if (index >= 0 && index < this.data.length && this.data[index]) {
+      const date = new Date(this.data[index].time);
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      timeStr = `${hours}:${minutes}`;
+    }
+
+    this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+    this.ctx.fillRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
+    this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+    this.ctx.strokeRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
+    this.ctx.fillStyle = this.theme.textColor || '#aaa';
+    this.ctx.font = '11px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(timeStr, this.crosshair.x, yBottom + this.margin.bottom / 2);
+
+    this.ctx.restore();
+  }
+
+  private drawCurrentPriceLabel(): void {
+    if (!this.lastPrice) return;
+
+    const width = this.ctx.canvas.width / window.devicePixelRatio;
+    const height = this.ctx.canvas.height / window.devicePixelRatio;
+    const right = width - this.margin.right;
+    const y = this.scales.priceToY(this.lastPrice);
+
+    this.ctx.save();
+
+    // Draw dashed line across the chart at the last price level
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.strokeStyle = this.theme.textColor || '#aaa';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(this.margin.left, y);
+    this.ctx.lineTo(right, y);
+    this.ctx.stroke();
+    this.ctx.setLineDash([]);
+
+    // Draw price label on the price bar (right side scale area)
+    const labelText = this.lastPrice.toFixed(2);
+    this.ctx.font = 'bold 12px system-ui';
+    const textWidth = this.ctx.measureText(labelText).width;
+    const boxWidth = textWidth + 8;
+    const boxHeight = 18;
+
+    // Position the label in the price bar area
+    const boxX = right + 2;
+    const boxY = y - boxHeight / 2;
+
+    // Draw background
+    this.ctx.fillStyle = '#26a69a';  // Green background like in the image
+    this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Draw border
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Draw price text
+    this.ctx.fillStyle = '#ffffff';  // White text
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(labelText, boxX + boxWidth / 2, boxY + boxHeight / 2);
+
+    this.ctx.restore();
   }
 }

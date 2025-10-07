@@ -5,6 +5,7 @@ export class Interactions {
   private margin: { top: number; bottom: number; left: number; right: number };
   private view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number };
   private events: VFCEvents;
+  private crosshair: { x: number; y: number; visible: boolean };
   private momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
   private readonly PAN_INVERT = { x: true, y: false };
 
@@ -12,12 +13,15 @@ export class Interactions {
     canvas: HTMLCanvasElement,
     margin: { top: number; bottom: number; left: number; right: number },
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
-    events: VFCEvents
+    events: VFCEvents,
+    crosshair: { x: number; y: number; visible: boolean }
   ) {
     this.canvas = canvas;
     this.margin = margin;
     this.view = view;
     this.events = events;
+    this.crosshair = crosshair;
+    this.setupMouseTracking();
   }
 
   handleWheel(e: WheelEvent): void {
@@ -123,5 +127,40 @@ export class Interactions {
     if (Math.abs(this.momentum.vx) < 0.001) {
       this.cancelMomentum();
     }
+  }
+
+  private setupMouseTracking(): void {
+    this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+    this.canvas.addEventListener('mouseleave', this.handleMouseLeave.bind(this));
+  }
+
+  private handleMouseMove(e: MouseEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Check if mouse is over the chart area
+    const chartRight = this.canvas.clientWidth - this.margin.right;
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const yBottom = canvasHeight - this.margin.bottom;
+
+    const overChartBody = x >= this.margin.left && x <= chartRight &&
+                         y >= this.margin.top && y <= yBottom;
+
+    if (overChartBody) {
+      this.crosshair.x = x;
+      this.crosshair.y = y;
+      this.crosshair.visible = true;
+    } else {
+      this.crosshair.visible = false;
+    }
+
+    // Trigger redraw
+    this.events.onMouseMove?.(x, y, this.crosshair.visible);
+  }
+
+  private handleMouseLeave(): void {
+    this.crosshair.visible = false;
+    this.events.onMouseMove?.(-1, -1, false);
   }
 }

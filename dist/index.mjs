@@ -93,6 +93,12 @@ class Scales {
         const shift = pixelOffset - startIndex * s;
         return shift < 0 ? shift + s : shift;
     }
+    screenXToDataIndex(screenX) {
+        const vr = this.getVisibleRange();
+        const s = this.scaledSpacing();
+        const relativeX = screenX - this.margin.left + this.xShift - s / 2;
+        return vr.startIndex + Math.floor(relativeX / s);
+    }
     get ladderTop() {
         if (this.data.length === 0)
             return 10000;
@@ -101,13 +107,15 @@ class Scales {
 }
 
 class Interactions {
-    constructor(canvas, margin, view, events) {
+    constructor(canvas, margin, view, events, crosshair) {
         this.momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
         this.PAN_INVERT = { x: true, y: false };
         this.canvas = canvas;
         this.margin = margin;
         this.view = view;
         this.events = events;
+        this.crosshair = crosshair;
+        this.setupMouseTracking();
     }
     handleWheel(e) {
         var _a, _b, _c, _d, _e, _f;
@@ -207,10 +215,41 @@ class Interactions {
             this.cancelMomentum();
         }
     }
+    setupMouseTracking() {
+        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+        this.canvas.addEventListener('mouseleave', this.handleMouseLeave.bind(this));
+    }
+    handleMouseMove(e) {
+        var _a, _b;
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        // Check if mouse is over the chart area
+        const chartRight = this.canvas.clientWidth - this.margin.right;
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const yBottom = canvasHeight - this.margin.bottom;
+        const overChartBody = x >= this.margin.left && x <= chartRight &&
+            y >= this.margin.top && y <= yBottom;
+        if (overChartBody) {
+            this.crosshair.x = x;
+            this.crosshair.y = y;
+            this.crosshair.visible = true;
+        }
+        else {
+            this.crosshair.visible = false;
+        }
+        // Trigger redraw
+        (_b = (_a = this.events).onMouseMove) === null || _b === void 0 ? void 0 : _b.call(_a, x, y, this.crosshair.visible);
+    }
+    handleMouseLeave() {
+        var _a, _b;
+        this.crosshair.visible = false;
+        (_b = (_a = this.events).onMouseMove) === null || _b === void 0 ? void 0 : _b.call(_a, -1, -1, false);
+    }
 }
 
 class Drawing {
-    constructor(ctx, data, margin, view, showGrid, showBounds, scales, theme) {
+    constructor(ctx, data, margin, view, showGrid, showBounds, scales, theme, crosshair, lastPrice) {
         this.ctx = ctx;
         this.data = data;
         this.margin = margin;
@@ -219,6 +258,8 @@ class Drawing {
         this.showBounds = showBounds;
         this.scales = scales;
         this.theme = theme;
+        this.crosshair = crosshair;
+        this.lastPrice = lastPrice;
     }
     drawAll() {
         const width = this.ctx.canvas.width / window.devicePixelRatio;
@@ -228,6 +269,9 @@ class Drawing {
             this.drawGrid();
         this.drawChart();
         this.drawScales();
+        this.drawCurrentPriceLabel();
+        if (this.crosshair.visible)
+            this.drawCrosshair();
         if (this.showBounds)
             this.drawBounds();
     }
@@ -527,6 +571,99 @@ class Drawing {
         this.ctx.fillStyle = color;
         this.ctx.fillRect(cx - half, Math.min(yOpen, yClose), this.scales.scaledCandle(), Math.abs(yClose - yOpen));
     }
+    drawCrosshair() {
+        if (!this.crosshair.visible)
+            return;
+        const width = this.ctx.canvas.width / window.devicePixelRatio;
+        this.ctx.canvas.height / window.devicePixelRatio;
+        const chartRight = width - this.margin.right;
+        const yBottom = this.margin.top + this.scales.chartHeight();
+        this.ctx.save();
+        // Draw vertical line
+        this.ctx.strokeStyle = this.theme.textColor || '#aaa';
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([2, 2]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.crosshair.x, this.margin.top);
+        this.ctx.lineTo(this.crosshair.x, yBottom);
+        this.ctx.stroke();
+        // Draw horizontal line
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.margin.left, this.crosshair.y);
+        this.ctx.lineTo(chartRight, this.crosshair.y);
+        this.ctx.stroke();
+        // Draw price label on right side
+        const price = this.scales.rowIndexToPrice((this.crosshair.y - this.margin.top) / this.scales.rowHeightPx() + this.view.offsetRows);
+        this.ctx.setLineDash([]);
+        this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+        this.ctx.fillRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
+        this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+        this.ctx.strokeRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
+        this.ctx.fillStyle = this.theme.textColor || '#aaa';
+        this.ctx.font = '11px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(price.toFixed(2), chartRight + this.margin.right / 2, this.crosshair.y);
+        // Draw time label on bottom
+        const index = this.scales.screenXToDataIndex(this.crosshair.x);
+        let timeStr = '--:--';
+        if (index >= 0 && index < this.data.length && this.data[index]) {
+            const date = new Date(this.data[index].time);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            timeStr = `${hours}:${minutes}`;
+        }
+        this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+        this.ctx.fillRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
+        this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+        this.ctx.strokeRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
+        this.ctx.fillStyle = this.theme.textColor || '#aaa';
+        this.ctx.font = '11px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(timeStr, this.crosshair.x, yBottom + this.margin.bottom / 2);
+        this.ctx.restore();
+    }
+    drawCurrentPriceLabel() {
+        if (!this.lastPrice)
+            return;
+        const width = this.ctx.canvas.width / window.devicePixelRatio;
+        this.ctx.canvas.height / window.devicePixelRatio;
+        const right = width - this.margin.right;
+        const y = this.scales.priceToY(this.lastPrice);
+        this.ctx.save();
+        // Draw dashed line across the chart at the last price level
+        this.ctx.setLineDash([5, 5]);
+        this.ctx.strokeStyle = this.theme.textColor || '#aaa';
+        this.ctx.lineWidth = 1;
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.margin.left, y);
+        this.ctx.lineTo(right, y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+        // Draw price label on the price bar (right side scale area)
+        const labelText = this.lastPrice.toFixed(2);
+        this.ctx.font = 'bold 12px system-ui';
+        const textWidth = this.ctx.measureText(labelText).width;
+        const boxWidth = textWidth + 8;
+        const boxHeight = 18;
+        // Position the label in the price bar area
+        const boxX = right + 2;
+        const boxY = y - boxHeight / 2;
+        // Draw background
+        this.ctx.fillStyle = '#26a69a'; // Green background like in the image
+        this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw border
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw price text
+        this.ctx.fillStyle = '#ffffff'; // White text
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(labelText, boxX + boxWidth / 2, boxY + boxHeight / 2);
+        this.ctx.restore();
+    }
 }
 
 class Chart {
@@ -539,6 +676,8 @@ class Chart {
         this.view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
         this.showGrid = true;
         this.showBounds = false;
+        this.crosshair = { x: -1, y: -1, visible: false };
+        this.lastPrice = null;
         // Constants
         this.TICK = 10;
         this.BASE_CANDLE = 15;
@@ -580,9 +719,10 @@ class Chart {
         this.interactions = new Interactions(this.canvas, this.margin, this.view, {
             ...this.events,
             onPan: () => this.drawing.drawAll(),
-            onZoom: () => this.drawing.drawAll()
-        });
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme);
+            onZoom: () => this.drawing.drawAll(),
+            onMouseMove: () => this.drawing.drawAll()
+        }, this.crosshair);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice);
         this.setupCanvas();
         this.bindEvents();
         this.layout();
@@ -620,9 +760,15 @@ class Chart {
     // Public API
     setData(data) {
         this.data = data;
+        // Calculate lastPrice first, before creating Drawing instance
+        if (data.length > 0) {
+            const lastPrice = data[data.length - 1].close;
+            this.lastPrice = lastPrice;
+        }
         // Update scales with new data
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice // Now has the correct value
+        );
         // Set initial view to show the end of the chart (latest data) and center the last price vertically
         if (data.length > 0) {
             const s = this.scales.scaledSpacing();
@@ -631,7 +777,7 @@ class Chart {
             const startIndex = Math.max(0, data.length - visibleCount);
             this.view.offsetX = startIndex * s;
             // Center the last candle's close price vertically
-            const lastPrice = data[data.length - 1].close;
+            const lastPrice = this.lastPrice; // We know it's not null at this point
             const totalRows = Math.floor(this.scales.chartHeight() / this.scales.rowHeightPx());
             const centerRow = totalRows / 2;
             this.view.offsetRows = centerRow - (this.scales.priceToRowIndex(lastPrice) - centerRow);
