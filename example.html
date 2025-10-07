@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Volume Footprint Price Chart</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <div id="container" class="vfc-container">
+    <div class="vfc-toolbar">
+      <button id="loadData" class="tool-btn">Load Data</button>
+      <button id="resetZoom" class="tool-btn">Reset</button>
+      <button id="toggleGrid" class="tool-btn">Grid On/Off</button>
+      <button id="toggleBounds" class="tool-btn">Bounds On/Off</button>
+      <span class="hint">Volume Footprint Chart</span>
+    </div>
+    <div class="vfc-chart-container">
+      <canvas class="vfc-chart"></canvas>
+    </div>
+  </div>
+
+ <script src="dist/index.js"></script>
+ <script>
+  // =============================================================
+  // Volume Footprint Chart Example — Matches original styling
+  // =============================================================
+
+  const container = document.getElementById('container');
+
+  // Create chart using the bitchart API
+  const chart = bitchart.createChart(container, {
+     width: window.innerWidth,
+     height: window.innerHeight - 60, // Account for toolbar
+     grid: { horzLines: { visible: true } }
+   });
+
+   // Add volume footprint series
+   const series = chart.addVolumeFootprintSeries({
+     upColor: '#26a69a',
+     downColor: '#ef5350'
+   });
+
+   // Generate demo data
+   const candles = makeDemoCandles();
+
+   // Set up event listeners
+   document.getElementById('loadData').addEventListener('click', () => {
+     series.setData(candles);
+   });
+
+   document.getElementById('resetZoom').addEventListener('click', () => {
+     chart.applyOptions({
+       width: window.innerWidth,
+       height: window.innerHeight - 60
+     });
+   });
+
+   document.getElementById('toggleGrid').addEventListener('click', () => {
+     // Note: Grid toggle would need to be implemented in the chart options
+     console.log('Grid toggle clicked');
+   });
+
+   document.getElementById('toggleBounds').addEventListener('click', () => {
+     // Note: Bounds toggle would need to be implemented in the chart options
+     console.log('Bounds toggle clicked');
+   });
+
+   // Load initial data - shows the end of the data
+   series.setData(candles);
+
+   // Demo data generator (matches original)
+   function randNorm(){
+     let u=0,v=0; while(u===0) u=Math.random(); while(v===0) v=Math.random();
+     return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+   }
+
+   function buildFootprint(high, low){
+     const fp=[]; const span = Math.max(10, high - low); const mid = (high+low)/2; const poc = mid + randNorm()*span*0.05;
+     for (let p = Math.ceil(high/10)*10; p >= Math.floor(low/10)*10; p -= 10){
+       const dist = Math.abs(p - poc) / (span + 10);
+       const base = 200000, amp = 500000;
+       const vol = Math.max(50000, base + (1 - dist) * amp + randNorm() * 150000);
+       const bias = p > mid ? 0.6 : 0.4;
+       const sell = Math.max(0, Math.round(vol * (bias + 0.1*Math.random())));
+       const buy  = Math.max(0, Math.round(vol * (1 - (bias + 0.1*Math.random()))));
+       fp.push({price:p,buy,sell});
+     }
+     return fp;
+   }
+
+   function makeDemoCandles(){
+     const out=[]; let t=Date.now()-60*60*1000; let open=10000;
+     for(let i=0;i<120;i++){
+       const drift = randNorm() * 60;
+       const high = open + Math.abs(randNorm())*120 + 40;
+       const low  = open - Math.abs(randNorm())*120 - 40;
+       const close = open + drift;
+       out.push({ time:new Date(t+=60_000).toISOString(), open, high, low, close, footprint: buildFootprint(high, low) });
+       open = close;
+     }
+     return out;
+   }
+ </script>
+</body>
+</html>

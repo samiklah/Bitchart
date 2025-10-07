@@ -1,0 +1,56 @@
+/* VFC Chart Styles */
+.vfc-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #181a1f;
+  color: #eee;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+.vfc-toolbar {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background: #111;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  align-items: center;
+}
+
+.vfc-toolbar .tool-btn {
+  background: #222;
+  color: #eee;
+  padding: 6px 12px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.vfc-toolbar .tool-btn:hover {
+  background: #333;
+}
+
+.vfc-chart-container {
+  flex: 1;
+  width: 100%;
+  overflow: hidden;
+}
+
+.vfc-chart {
+  display: block;
+  background: #181a1f;
+  border-top: 1px solid #333;
+  border-bottom: 1px solid #333;
+  width: 100%;
+  height: 100%;
+}
+
+.vfc-toolbar .hint {
+  opacity: 0.7;
+  font-size: 12px;
+  margin-left: auto;
+}

@@ -1,0 +1,35 @@
+import { CandleData, VFCOptions, VFCEvents } from './types';
+export declare class Chart {
+    private canvas;
+    private ctx;
+    private data;
+    private options;
+    private events;
+    private margin;
+    private view;
+    private showGrid;
+    private showBounds;
+    private readonly TICK;
+    private readonly BASE_CANDLE;
+    private readonly BASE_BOX;
+    private readonly BASE_IMBALANCE;
+    private readonly BASE_SPACING;
+    private readonly FIXED_GAP;
+    private readonly baseRowPx;
+    private readonly TEXT_VIS;
+    private scales;
+    private interactions;
+    private drawing;
+    constructor(container: HTMLElement, options?: VFCOptions, events?: VFCEvents);
+    private setupCanvas;
+    private bindEvents;
+    private handleWheel;
+    private handlePointerDown;
+    private layout;
+    setData(data: CandleData[]): void;
+    updateOptions(options: Partial<VFCOptions>): void;
+    resize(width: number, height: number): void;
+    destroy(): void;
+    getOptions(): Required<VFCOptions>;
+    getShowGrid(): boolean;
+}
