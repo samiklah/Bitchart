@@ -7,6 +7,8 @@
   background: #181a1f;
   color: #eee;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  display: flex;
+  flex-direction: column;
 }
 
 .vfc-toolbar {
@@ -41,7 +43,7 @@
 
 .vfc-chart-container {
   width: 100%;
-  height: 100%;
+  flex: 1;
   overflow: hidden;
 }
 

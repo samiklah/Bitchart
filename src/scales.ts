@@ -6,6 +6,7 @@ export class Scales {
   private view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number };
   private canvasWidth: number;
   private canvasHeight: number;
+  private showVolumeFootprint: boolean;
   private TICK: number;
   private baseRowPx: number;
   private TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number };
@@ -16,6 +17,7 @@ export class Scales {
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
     canvasWidth: number,
     canvasHeight: number,
+    showVolumeFootprint: boolean,
     TICK: number,
     baseRowPx: number,
     TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number }
@@ -25,6 +27,7 @@ export class Scales {
     this.view = view;
     this.canvasWidth = canvasWidth;
     this.canvasHeight = canvasHeight;
+    this.showVolumeFootprint = showVolumeFootprint;
     this.TICK = TICK;
     this.baseRowPx = baseRowPx;
     this.TEXT_VIS = TEXT_VIS;
@@ -39,6 +42,9 @@ export class Scales {
   }
 
   scaledSpacing(): number {
+    if (!this.showVolumeFootprint) {
+      return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
+    }
     return 132 * this.view.zoomX; // Reduced spacing for closer candle layout
   }
 

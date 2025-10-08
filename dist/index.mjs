@@ -1,11 +1,12 @@
 class Scales {
-    constructor(data, margin, view, canvasWidth, canvasHeight, TICK, baseRowPx, TEXT_VIS) {
+    constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS) {
         this.data = [];
         this.data = data;
         this.margin = margin;
         this.view = view;
         this.canvasWidth = canvasWidth;
         this.canvasHeight = canvasHeight;
+        this.showVolumeFootprint = showVolumeFootprint;
         this.TICK = TICK;
         this.baseRowPx = baseRowPx;
         this.TEXT_VIS = TEXT_VIS;
@@ -17,6 +18,9 @@ class Scales {
         return this.baseRowPx * this.view.zoomY;
     }
     scaledSpacing() {
+        if (!this.showVolumeFootprint) {
+            return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
+        }
         return 132 * this.view.zoomX; // Reduced spacing for closer candle layout
     }
     scaledCandle() {
@@ -330,13 +334,14 @@ class Interactions {
 }
 
 class Drawing {
-    constructor(ctx, data, margin, view, showGrid, showBounds, scales, theme, crosshair, lastPrice, interactions) {
+    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, scales, theme, crosshair, lastPrice, interactions) {
         this.ctx = ctx;
         this.data = data;
         this.margin = margin;
         this.view = view;
         this.showGrid = showGrid;
         this.showBounds = showBounds;
+        this.showVolumeFootprint = showVolumeFootprint;
         this.scales = scales;
         this.theme = theme;
         this.crosshair = crosshair;
@@ -411,13 +416,6 @@ class Drawing {
         const rectY = Math.min(startY, endY);
         const rectWidth = Math.abs(endX - startX);
         const rectHeight = Math.abs(endY - startY);
-        // Draw transparent blue rectangle
-        this.ctx.fillStyle = 'rgba(0, 0, 255, 0.2)'; // Transparent blue
-        this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
-        // Draw rectangle border
-        this.ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
-        this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
         // Calculate price and time differences using current screen positions
         const startPrice = this.scales.screenYToPrice(startY);
         const endPrice = this.scales.screenYToPrice(endY);
@@ -425,28 +423,55 @@ class Drawing {
         const endIndex = this.scales.screenXToDataIndex(endX);
         const priceDiff = endPrice - startPrice;
         const timeDiff = endIndex - startIndex;
-        // Draw measurement labels
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = '11px system-ui';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
+        const isPositive = priceDiff >= 0;
+        // Draw light green/red rectangle
+        const rectColor = isPositive ? 'rgba(22, 163, 74, 0.2)' : 'rgba(220, 38, 38, 0.2)'; // Light green/red
+        this.ctx.fillStyle = rectColor;
+        this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+        // Draw rectangle border
+        const borderColor = isPositive ? 'rgba(22, 163, 74, 0.8)' : 'rgba(220, 38, 38, 0.8)';
+        this.ctx.strokeStyle = borderColor;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+        // Draw measure data box below the rectangle with all details
         const centerX = rectX + rectWidth / 2;
-        const centerY = rectY + rectHeight / 2;
         // Calculate percentage change
         const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
-        // Draw price difference with sign
+        // Prepare all text lines
         const priceSign = priceDiff >= 0 ? '+' : '';
         const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
-        this.ctx.fillText(priceText, centerX, centerY - 20);
-        // Draw start and end prices
         const startPriceText = `Start: ${startPrice.toFixed(2)}`;
         const endPriceText = `End: ${endPrice.toFixed(2)}`;
-        this.ctx.fillText(startPriceText, centerX, centerY - 5);
-        this.ctx.fillText(endPriceText, centerX, centerY + 5);
-        // Draw time difference
         const timeSign = timeDiff >= 0 ? '+' : '';
         const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
-        this.ctx.fillText(timeText, centerX, centerY + 20);
+        const lines = [priceText, startPriceText, endPriceText, timeText];
+        // Bigger font
+        this.ctx.font = '14px system-ui';
+        const lineHeight = 18;
+        const padding = 8;
+        const maxWidth = Math.max(...lines.map(line => this.ctx.measureText(line).width));
+        const boxWidth = maxWidth + padding * 2;
+        const boxHeight = lines.length * lineHeight + padding * 2;
+        const boxX = centerX - boxWidth / 2;
+        const boxY = rectY + rectHeight + 8;
+        // Box colors
+        const boxColor = isPositive ? '#16a34a' : '#dc2626'; // Green for positive, red for negative
+        const textColor = '#ffffff';
+        // Draw box background
+        this.ctx.fillStyle = boxColor;
+        this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw box border
+        this.ctx.strokeStyle = textColor;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw text lines
+        this.ctx.fillStyle = textColor;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'top';
+        lines.forEach((line, index) => {
+            const y = boxY + padding + index * lineHeight;
+            this.ctx.fillText(line, centerX, y);
+        });
         this.ctx.restore();
     }
     drawScales() {
@@ -545,154 +570,156 @@ class Drawing {
     drawFootprint(candle, i, startIndex) {
         var _a, _b, _c, _d;
         const cx = this.scales.indexToX(i, startIndex);
-        const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
-        const enableProfile = rows.length > 3;
-        // Calculate VAH/VAL
-        const levelVols = rows.map(r => r.buy + r.sell);
-        const totalVol = levelVols.reduce((a, b) => a + b, 0);
-        let pocIdx = 0;
-        for (let i = 1; i < levelVols.length; i++) {
-            if (levelVols[i] > levelVols[pocIdx])
-                pocIdx = i;
-        }
-        let included = new Set([pocIdx]);
-        if (enableProfile) {
-            let acc = levelVols[pocIdx];
-            let up = pocIdx - 1, down = pocIdx + 1;
-            while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
-                const upVol = up >= 0 ? levelVols[up] : -1;
-                const downVol = down < rows.length ? levelVols[down] : -1;
-                if (upVol >= downVol) {
-                    if (up >= 0) {
-                        included.add(up);
-                        acc += levelVols[up];
-                        up--;
-                    }
-                    else {
-                        included.add(down);
-                        acc += levelVols[down];
-                        down++;
-                    }
-                }
-                else {
-                    if (down < rows.length) {
-                        included.add(down);
-                        acc += levelVols[down];
-                        down++;
-                    }
-                    else {
-                        included.add(up);
-                        acc += levelVols[up];
-                        up--;
-                    }
-                }
-            }
-        }
-        const vahIdx = Math.min(...included);
-        const valIdx = Math.max(...included);
-        const VAH = (_a = rows[vahIdx]) === null || _a === void 0 ? void 0 : _a.price;
-        const VAL = (_b = rows[valIdx]) === null || _b === void 0 ? void 0 : _b.price;
         const half = this.scales.scaledCandle() / 2;
-        const leftX = cx - half - this.scales.scaledBox();
-        const rightX = cx + half;
-        const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
-        const buyBase = (_c = this.theme.volumeBuyBase) !== null && _c !== void 0 ? _c : 0.15;
-        const sellBase = (_d = this.theme.volumeSellBase) !== null && _d !== void 0 ? _d : 0.15;
-        const buyRGBA = (v) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
-        const sellRGBA = (v) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
-        let maxRow = -Infinity;
-        let totBuy = 0, totSell = 0;
-        // Draw boxes
-        for (let r = 0; r < rows.length; r++) {
-            const f = rows[r];
-            const row = this.scales.priceToRowIndex(f.price);
-            const yTop = this.scales.rowToY(row - 0.5);
-            const yBot = this.scales.rowToY(row + 0.5);
-            const h = Math.max(1, yBot - yTop);
-            maxRow = Math.max(maxRow, row + 0.5);
-            totBuy += f.buy;
-            totSell += f.sell;
-            const isPOC = enableProfile && (r === pocIdx);
-            this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : sellRGBA(f.sell);
-            this.ctx.fillRect(leftX, yTop, this.scales.scaledBox(), h);
-            this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : buyRGBA(f.buy);
-            this.ctx.fillRect(rightX, yTop, this.scales.scaledBox(), h);
-        }
-        // Imbalance markers
-        for (let r = 0; r < rows.length; r++) {
-            const f = rows[r];
-            const prev = rows[r - 1];
-            const next = rows[r + 1];
-            const row = this.scales.priceToRowIndex(f.price);
-            const yTop = this.scales.rowToY(row - 0.5);
-            const yBot = this.scales.rowToY(row + 0.5);
-            const h = Math.max(1, yBot - yTop);
-            if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
-                this.ctx.fillStyle = this.theme.imbalanceSell || '#dc2626';
-                this.ctx.fillRect(leftX - this.scales.scaledImb() - 1, yTop, this.scales.scaledImb(), h);
+        if (this.showVolumeFootprint) {
+            const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
+            const enableProfile = rows.length > 3;
+            // Calculate VAH/VAL
+            const levelVols = rows.map(r => r.buy + r.sell);
+            const totalVol = levelVols.reduce((a, b) => a + b, 0);
+            let pocIdx = 0;
+            for (let i = 1; i < levelVols.length; i++) {
+                if (levelVols[i] > levelVols[pocIdx])
+                    pocIdx = i;
             }
-            if (next && f.buy >= 3 * Math.max(1, next.sell)) {
-                this.ctx.fillStyle = this.theme.imbalanceBuy || '#16a34a';
-                this.ctx.fillRect(rightX + this.scales.scaledBox() + 1, yTop, this.scales.scaledImb(), h);
+            let included = new Set([pocIdx]);
+            if (enableProfile) {
+                let acc = levelVols[pocIdx];
+                let up = pocIdx - 1, down = pocIdx + 1;
+                while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
+                    const upVol = up >= 0 ? levelVols[up] : -1;
+                    const downVol = down < rows.length ? levelVols[down] : -1;
+                    if (upVol >= downVol) {
+                        if (up >= 0) {
+                            included.add(up);
+                            acc += levelVols[up];
+                            up--;
+                        }
+                        else {
+                            included.add(down);
+                            acc += levelVols[down];
+                            down++;
+                        }
+                    }
+                    else {
+                        if (down < rows.length) {
+                            included.add(down);
+                            acc += levelVols[down];
+                            down++;
+                        }
+                        else {
+                            included.add(up);
+                            acc += levelVols[up];
+                            up--;
+                        }
+                    }
+                }
             }
-        }
-        // Volume numbers
-        if (this.scales.shouldShowCellText()) {
-            const fontSize = Math.max(8, Math.min(16, 11 * this.view.zoomX));
-            this.ctx.font = `${fontSize}px system-ui`;
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
+            const vahIdx = Math.min(...included);
+            const valIdx = Math.max(...included);
+            const VAH = (_a = rows[vahIdx]) === null || _a === void 0 ? void 0 : _a.price;
+            const VAL = (_b = rows[valIdx]) === null || _b === void 0 ? void 0 : _b.price;
+            const leftX = cx - half - this.scales.scaledBox();
+            const rightX = cx + half;
+            const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
+            const buyBase = (_c = this.theme.volumeBuyBase) !== null && _c !== void 0 ? _c : 0.15;
+            const sellBase = (_d = this.theme.volumeSellBase) !== null && _d !== void 0 ? _d : 0.15;
+            const buyRGBA = (v) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
+            const sellRGBA = (v) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
+            let maxRow = -Infinity;
+            let totBuy = 0, totSell = 0;
+            // Draw boxes
             for (let r = 0; r < rows.length; r++) {
                 const f = rows[r];
                 const row = this.scales.priceToRowIndex(f.price);
-                const y = this.scales.rowToY(row);
+                const yTop = this.scales.rowToY(row - 0.5);
+                const yBot = this.scales.rowToY(row + 0.5);
+                const h = Math.max(1, yBot - yTop);
+                maxRow = Math.max(maxRow, row + 0.5);
+                totBuy += f.buy;
+                totSell += f.sell;
                 const isPOC = enableProfile && (r === pocIdx);
-                this.ctx.fillStyle = isPOC ? (this.theme.pocTextColor || this.theme.textColorBright || '#ffffff') : (this.theme.textColorBright || '#ddd');
-                this.ctx.fillText(this.scales.formatK(f.sell), leftX + this.scales.scaledBox() / 2, y);
-                this.ctx.fillText(this.scales.formatK(f.buy), rightX + this.scales.scaledBox() / 2, y);
+                this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : sellRGBA(f.sell);
+                this.ctx.fillRect(leftX, yTop, this.scales.scaledBox(), h);
+                this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : buyRGBA(f.buy);
+                this.ctx.fillRect(rightX, yTop, this.scales.scaledBox(), h);
+            }
+            // Imbalance markers
+            for (let r = 0; r < rows.length; r++) {
+                const f = rows[r];
+                const prev = rows[r - 1];
+                const next = rows[r + 1];
+                const row = this.scales.priceToRowIndex(f.price);
+                const yTop = this.scales.rowToY(row - 0.5);
+                const yBot = this.scales.rowToY(row + 0.5);
+                const h = Math.max(1, yBot - yTop);
+                if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
+                    this.ctx.fillStyle = this.theme.imbalanceSell || '#dc2626';
+                    this.ctx.fillRect(leftX - this.scales.scaledImb() - 1, yTop, this.scales.scaledImb(), h);
+                }
+                if (next && f.buy >= 3 * Math.max(1, next.sell)) {
+                    this.ctx.fillStyle = this.theme.imbalanceBuy || '#16a34a';
+                    this.ctx.fillRect(rightX + this.scales.scaledBox() + 1, yTop, this.scales.scaledImb(), h);
+                }
+            }
+            // Volume numbers
+            if (this.scales.shouldShowCellText()) {
+                const fontSize = Math.max(8, Math.min(16, 11 * this.view.zoomX));
+                this.ctx.font = `${fontSize}px system-ui`;
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                for (let r = 0; r < rows.length; r++) {
+                    const f = rows[r];
+                    const row = this.scales.priceToRowIndex(f.price);
+                    const y = this.scales.rowToY(row);
+                    const isPOC = enableProfile && (r === pocIdx);
+                    this.ctx.fillStyle = isPOC ? (this.theme.pocTextColor || this.theme.textColorBright || '#ffffff') : (this.theme.textColorBright || '#ddd');
+                    this.ctx.fillText(this.scales.formatK(f.sell), leftX + this.scales.scaledBox() / 2, y);
+                    this.ctx.fillText(this.scales.formatK(f.buy), rightX + this.scales.scaledBox() / 2, y);
+                }
+            }
+            // VAH/VAL lines and labels
+            if (enableProfile && this.scales.shouldShowCellText()) {
+                const rVah = this.scales.priceToRowIndex(VAH), rVal = this.scales.priceToRowIndex(VAL);
+                const yVah = this.scales.rowToY(rVah - 0.5);
+                const yVal = this.scales.rowToY(rVal + 0.5);
+                const rightEdge = rightX + this.scales.scaledBox();
+                this.ctx.save();
+                this.ctx.setLineDash([4, 2]);
+                this.ctx.strokeStyle = this.theme.vahValColor || '#9ca3af';
+                this.ctx.beginPath();
+                this.ctx.moveTo(leftX, yVah);
+                this.ctx.lineTo(rightEdge, yVah);
+                this.ctx.stroke();
+                this.ctx.beginPath();
+                this.ctx.moveTo(leftX, yVal);
+                this.ctx.lineTo(rightEdge, yVal);
+                this.ctx.stroke();
+                this.ctx.setLineDash([]);
+                const vahFontSize = Math.max(6, Math.min(12, 8 * this.view.zoomX));
+                this.ctx.fillStyle = this.theme.vahValLabelColor || '#cfd3d6';
+                this.ctx.font = `${vahFontSize}px monospace`;
+                this.ctx.textAlign = 'left';
+                this.ctx.textBaseline = 'middle';
+                const labelX = cx - half - this.scales.scaledBox() + 3;
+                this.ctx.fillText('VAH', labelX, yVah);
+                this.ctx.fillText('VAL', labelX, yVal);
+                this.ctx.restore();
+            }
+            // Delta/Total labels
+            if (this.scales.shouldShowCellText()) {
+                const yLowFootprint = this.scales.rowToY(maxRow) + 2;
+                const delta = totBuy - totSell;
+                const deltaFontSize = Math.max(8, Math.min(18, 12 * this.view.zoomX));
+                this.ctx.textAlign = 'center';
+                this.ctx.font = `${deltaFontSize}px system-ui`;
+                this.ctx.fillStyle = delta >= 0 ? (this.theme.deltaPositive || '#16a34a') : (this.theme.deltaNegative || '#dc2626');
+                this.ctx.fillText(`Delta ${this.scales.formatK(delta)}`, cx, yLowFootprint + 14);
+                this.ctx.fillStyle = this.theme.totalColor || '#fff';
+                this.ctx.fillText(`Total ${this.scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
             }
         }
-        // VAH/VAL lines and labels
-        if (enableProfile && this.scales.shouldShowCellText()) {
-            const rVah = this.scales.priceToRowIndex(VAH), rVal = this.scales.priceToRowIndex(VAL);
-            const yVah = this.scales.rowToY(rVah - 0.5);
-            const yVal = this.scales.rowToY(rVal + 0.5);
-            const rightEdge = rightX + this.scales.scaledBox();
-            this.ctx.save();
-            this.ctx.setLineDash([4, 2]);
-            this.ctx.strokeStyle = this.theme.vahValColor || '#9ca3af';
-            this.ctx.beginPath();
-            this.ctx.moveTo(leftX, yVah);
-            this.ctx.lineTo(rightEdge, yVah);
-            this.ctx.stroke();
-            this.ctx.beginPath();
-            this.ctx.moveTo(leftX, yVal);
-            this.ctx.lineTo(rightEdge, yVal);
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-            const vahFontSize = Math.max(6, Math.min(12, 8 * this.view.zoomX));
-            this.ctx.fillStyle = this.theme.vahValLabelColor || '#cfd3d6';
-            this.ctx.font = `${vahFontSize}px monospace`;
-            this.ctx.textAlign = 'left';
-            this.ctx.textBaseline = 'middle';
-            const labelX = cx - half - this.scales.scaledBox() + 3;
-            this.ctx.fillText('VAH', labelX, yVah);
-            this.ctx.fillText('VAL', labelX, yVal);
-            this.ctx.restore();
-        }
-        // Delta/Total labels
-        if (this.scales.shouldShowCellText()) {
-            const yLowFootprint = this.scales.rowToY(maxRow) + 2;
-            const delta = totBuy - totSell;
-            const deltaFontSize = Math.max(8, Math.min(18, 12 * this.view.zoomX));
-            this.ctx.textAlign = 'center';
-            this.ctx.font = `${deltaFontSize}px system-ui`;
-            this.ctx.fillStyle = delta >= 0 ? (this.theme.deltaPositive || '#16a34a') : (this.theme.deltaNegative || '#dc2626');
-            this.ctx.fillText(`Delta ${this.scales.formatK(delta)}`, cx, yLowFootprint + 14);
-            this.ctx.fillStyle = this.theme.totalColor || '#fff';
-            this.ctx.fillText(`Total ${this.scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
-        }
-        // Wick & body
+        // Wick & body (always drawn)
         const yHigh = this.scales.priceToY(candle.high);
         const yLow = this.scales.priceToY(candle.low);
         const yOpen = this.scales.priceToY(candle.open);
@@ -813,11 +840,6 @@ class Chart {
         // Create top toolbar
         const topToolbar = document.createElement('div');
         topToolbar.className = 'vfc-toolbar';
-        const loadDataBtn = document.createElement('button');
-        loadDataBtn.id = 'loadData';
-        loadDataBtn.className = 'tool-btn';
-        loadDataBtn.textContent = 'Load Data';
-        topToolbar.appendChild(loadDataBtn);
         const resetZoomBtn = document.createElement('button');
         resetZoomBtn.id = 'resetZoom';
         resetZoomBtn.className = 'tool-btn';
@@ -828,11 +850,11 @@ class Chart {
         toggleGridBtn.className = 'tool-btn';
         toggleGridBtn.textContent = 'Grid On/Off';
         topToolbar.appendChild(toggleGridBtn);
-        const toggleBoundsBtn = document.createElement('button');
-        toggleBoundsBtn.id = 'toggleBounds';
-        toggleBoundsBtn.className = 'tool-btn';
-        toggleBoundsBtn.textContent = 'Bounds On/Off';
-        topToolbar.appendChild(toggleBoundsBtn);
+        const toggleVolumeFootprintBtn = document.createElement('button');
+        toggleVolumeFootprintBtn.id = 'toggleVolumeFootprint';
+        toggleVolumeFootprintBtn.className = 'tool-btn';
+        toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
+        topToolbar.appendChild(toggleVolumeFootprintBtn);
         const measureBtn = document.createElement('button');
         measureBtn.id = 'measure';
         measureBtn.className = 'tool-btn';
@@ -852,20 +874,18 @@ class Chart {
         this.setupToolbarEventHandlers(container);
     }
     setupToolbarEventHandlers(container) {
-        const loadDataBtn = container.querySelector('#loadData');
         const resetZoomBtn = container.querySelector('#resetZoom');
         const toggleGridBtn = container.querySelector('#toggleGrid');
-        const toggleBoundsBtn = container.querySelector('#toggleBounds');
+        const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint');
         const measureBtn = container.querySelector('#measure');
         // Store references for later use
-        this.loadDataBtn = loadDataBtn;
         this.resetZoomBtn = resetZoomBtn;
         this.toggleGridBtn = toggleGridBtn;
-        this.toggleBoundsBtn = toggleBoundsBtn;
+        this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
         this.measureBtn = measureBtn;
     }
     constructor(container, options = {}, events = {}) {
-        var _a, _b;
+        var _a, _b, _c;
         this.data = [];
         this.events = {};
         // Chart state
@@ -873,13 +893,13 @@ class Chart {
         this.view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
         this.showGrid = true;
         this.showBounds = false;
+        this.showVolumeFootprint = true;
         this.crosshair = { x: -1, y: -1, visible: false };
         this.lastPrice = null;
         // Toolbar button references
-        this.loadDataBtn = null;
         this.resetZoomBtn = null;
         this.toggleGridBtn = null;
-        this.toggleBoundsBtn = null;
+        this.toggleVolumeFootprintBtn = null;
         this.measureBtn = null;
         // Constants
         this.TICK = 10;
@@ -892,11 +912,12 @@ class Chart {
         this.TEXT_VIS = { minZoomX: 0.5, minRowPx: 10, minBoxPx: 20 };
         // Create the complete chart structure with toolbars
         this.createChartStructure(container);
+        // Get the chart container for accurate dimensions
+        const chartContainer = container.querySelector('.vfc-chart-container');
         // Use existing canvas if available, otherwise create one
         this.canvas = container.querySelector('canvas');
         if (!this.canvas) {
             this.canvas = document.createElement('canvas');
-            const chartContainer = container.querySelector('.vfc-chart-container');
             if (chartContainer) {
                 chartContainer.appendChild(this.canvas);
             }
@@ -911,12 +932,13 @@ class Chart {
         this.ctx = ctx;
         this.options = {
             width: options.width || container.clientWidth || 800,
-            height: options.height || container.clientHeight || 600,
+            height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
             showGrid: (_a = options.showGrid) !== null && _a !== void 0 ? _a : true,
             showBounds: (_b = options.showBounds) !== null && _b !== void 0 ? _b : false,
+            showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
             tickSize: options.tickSize || 10,
-            initialZoomX: options.initialZoomX || 1,
-            initialZoomY: options.initialZoomY || 1,
+            initialZoomX: options.initialZoomX || 0.55,
+            initialZoomY: options.initialZoomY || 0.55,
             margin: options.margin || this.margin,
             theme: options.theme || {}
         };
@@ -924,17 +946,18 @@ class Chart {
         this.margin = this.options.margin;
         this.showGrid = this.options.showGrid;
         this.showBounds = this.options.showBounds;
+        this.showVolumeFootprint = this.options.showVolumeFootprint;
         this.view.zoomX = this.options.initialZoomX;
         this.view.zoomY = this.options.initialZoomY;
         // Initialize modules
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
         this.interactions = new Interactions(this.canvas, this.margin, this.view, {
             ...this.events,
             onPan: () => this.drawing.drawAll(),
             onZoom: () => this.drawing.drawAll(),
             onMouseMove: () => this.drawing.drawAll()
         }, this.crosshair, this.scales);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.setupCanvas();
         this.bindEvents();
         this.bindToolbarEvents();
@@ -955,18 +978,27 @@ class Chart {
         window.addEventListener('resize', this.layout.bind(this));
     }
     bindToolbarEvents() {
-        if (this.loadDataBtn) {
-            this.loadDataBtn.addEventListener('click', () => {
-                // This will be handled by external code, but we can provide a default behavior
-                console.log('Load Data clicked - implement external data loading');
-            });
-        }
         if (this.resetZoomBtn) {
             this.resetZoomBtn.addEventListener('click', () => {
-                this.updateOptions({
-                    width: this.options.width,
-                    height: this.options.height
-                });
+                // Reset view to show the end of the data, like initial load
+                if (this.data.length > 0) {
+                    this.updateOptions({
+                        width: this.options.width,
+                        height: this.options.height
+                    });
+                    // After updating options, set view to show last candles
+                    const s = this.scales.scaledSpacing();
+                    const contentW = this.options.width - this.margin.left - this.margin.right;
+                    const visibleCount = Math.ceil(contentW / s);
+                    const startIndex = Math.max(0, this.data.length - visibleCount);
+                    this.view.offsetX = startIndex * s;
+                    // Center the last candle's close price vertically at canvas center
+                    const lastPrice = this.lastPrice;
+                    const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
+                    const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
+                    this.view.offsetRows = centerRow - priceRow;
+                    this.drawing.drawAll();
+                }
             });
         }
         if (this.toggleGridBtn) {
@@ -976,10 +1008,10 @@ class Chart {
                 });
             });
         }
-        if (this.toggleBoundsBtn) {
-            this.toggleBoundsBtn.addEventListener('click', () => {
+        if (this.toggleVolumeFootprintBtn) {
+            this.toggleVolumeFootprintBtn.addEventListener('click', () => {
                 this.updateOptions({
-                    showBounds: !this.options.showBounds
+                    showVolumeFootprint: !this.options.showVolumeFootprint
                 });
             });
         }
@@ -1012,6 +1044,9 @@ class Chart {
             this.options.width = container.clientWidth || this.options.width;
             this.options.height = container.clientHeight || this.options.height;
         }
+        // Recreate scales and drawing with new dimensions
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.setupCanvas();
         this.drawing.drawAll();
     }
@@ -1024,8 +1059,8 @@ class Chart {
             this.lastPrice = lastPrice;
         }
         // Update scales with new data
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
         this.interactions);
         // Set initial view to show the end of the chart (latest data) and center the last price vertically
         if (data.length > 0) {
@@ -1034,16 +1069,30 @@ class Chart {
             const visibleCount = Math.ceil(contentW / s);
             const startIndex = Math.max(0, data.length - visibleCount);
             this.view.offsetX = startIndex * s;
-            // Center the last candle's close price vertically
-            const lastPrice = this.lastPrice; // We know it's not null at this point
-            const totalRows = Math.floor(this.scales.chartHeight() / this.scales.rowHeightPx());
-            const centerRow = totalRows / 2;
-            this.view.offsetRows = centerRow - (this.scales.priceToRowIndex(lastPrice) - centerRow);
+            // Center the last candle's close price vertically at canvas center
+            const lastPrice = this.lastPrice;
+            const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
+            const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
+            this.view.offsetRows = centerRow - priceRow;
         }
         this.drawing.drawAll();
     }
     updateOptions(options) {
+        const oldShowVolumeFootprint = this.showVolumeFootprint;
         Object.assign(this.options, options);
+        this.showGrid = this.options.showGrid;
+        this.showBounds = this.options.showBounds;
+        this.showVolumeFootprint = this.options.showVolumeFootprint;
+        // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
+        if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
+            const oldSpacing = oldShowVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
+            const newSpacing = this.showVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
+            const startIndex = Math.floor(this.view.offsetX / oldSpacing);
+            this.view.offsetX = startIndex * newSpacing;
+        }
+        // Recreate Scales first, then Drawing
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.layout();
     }
     resize(width, height) {

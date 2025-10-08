@@ -5,6 +5,7 @@ export declare class Scales {
     private view;
     private canvasWidth;
     private canvasHeight;
+    private showVolumeFootprint;
     private TICK;
     private baseRowPx;
     private TEXT_VIS;
@@ -18,7 +19,7 @@ export declare class Scales {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, canvasWidth: number, canvasHeight: number, TICK: number, baseRowPx: number, TEXT_VIS: {
+    }, canvasWidth: number, canvasHeight: number, showVolumeFootprint: boolean, TICK: number, baseRowPx: number, TEXT_VIS: {
         minZoomX: number;
         minRowPx: number;
         minBoxPx: number;

@@ -7,6 +7,7 @@ export declare class Drawing {
     private view;
     private showGrid;
     private showBounds;
+    private showVolumeFootprint;
     private scales;
     private theme;
     private crosshair;
@@ -22,7 +23,7 @@ export declare class Drawing {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, showGrid: boolean, showBounds: boolean, scales: Scales, theme: VFCTheme, crosshair: {
+    }, showGrid: boolean, showBounds: boolean, showVolumeFootprint: boolean, scales: Scales, theme: VFCTheme, crosshair: {
         x: number;
         y: number;
         visible: boolean;

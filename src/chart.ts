@@ -15,14 +15,14 @@ export class Chart {
   private view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
   private showGrid = true;
   private showBounds = false;
+  private showVolumeFootprint = true;
   private crosshair = { x: -1, y: -1, visible: false };
   private lastPrice: number | null = null;
 
   // Toolbar button references
-  private loadDataBtn: HTMLButtonElement | null = null;
   private resetZoomBtn: HTMLButtonElement | null = null;
   private toggleGridBtn: HTMLButtonElement | null = null;
-  private toggleBoundsBtn: HTMLButtonElement | null = null;
+  private toggleVolumeFootprintBtn: HTMLButtonElement | null = null;
   private measureBtn: HTMLButtonElement | null = null;
 
   // Constants
@@ -53,12 +53,6 @@ export class Chart {
     const topToolbar = document.createElement('div');
     topToolbar.className = 'vfc-toolbar';
 
-    const loadDataBtn = document.createElement('button');
-    loadDataBtn.id = 'loadData';
-    loadDataBtn.className = 'tool-btn';
-    loadDataBtn.textContent = 'Load Data';
-    topToolbar.appendChild(loadDataBtn);
-
     const resetZoomBtn = document.createElement('button');
     resetZoomBtn.id = 'resetZoom';
     resetZoomBtn.className = 'tool-btn';
@@ -71,11 +65,12 @@ export class Chart {
     toggleGridBtn.textContent = 'Grid On/Off';
     topToolbar.appendChild(toggleGridBtn);
 
-    const toggleBoundsBtn = document.createElement('button');
-    toggleBoundsBtn.id = 'toggleBounds';
-    toggleBoundsBtn.className = 'tool-btn';
-    toggleBoundsBtn.textContent = 'Bounds On/Off';
-    topToolbar.appendChild(toggleBoundsBtn);
+
+    const toggleVolumeFootprintBtn = document.createElement('button');
+    toggleVolumeFootprintBtn.id = 'toggleVolumeFootprint';
+    toggleVolumeFootprintBtn.className = 'tool-btn';
+    toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
+    topToolbar.appendChild(toggleVolumeFootprintBtn);
 
     const measureBtn = document.createElement('button');
     measureBtn.id = 'measure';
@@ -101,17 +96,15 @@ export class Chart {
   }
 
   private setupToolbarEventHandlers(container: HTMLElement): void {
-    const loadDataBtn = container.querySelector('#loadData') as HTMLButtonElement;
     const resetZoomBtn = container.querySelector('#resetZoom') as HTMLButtonElement;
     const toggleGridBtn = container.querySelector('#toggleGrid') as HTMLButtonElement;
-    const toggleBoundsBtn = container.querySelector('#toggleBounds') as HTMLButtonElement;
+    const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint') as HTMLButtonElement;
     const measureBtn = container.querySelector('#measure') as HTMLButtonElement;
 
     // Store references for later use
-    this.loadDataBtn = loadDataBtn;
     this.resetZoomBtn = resetZoomBtn;
     this.toggleGridBtn = toggleGridBtn;
-    this.toggleBoundsBtn = toggleBoundsBtn;
+    this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
     this.measureBtn = measureBtn;
   }
 
@@ -119,11 +112,13 @@ export class Chart {
     // Create the complete chart structure with toolbars
     this.createChartStructure(container);
 
+    // Get the chart container for accurate dimensions
+    const chartContainer = container.querySelector('.vfc-chart-container') as HTMLElement;
+
     // Use existing canvas if available, otherwise create one
     this.canvas = container.querySelector('canvas') as HTMLCanvasElement;
     if (!this.canvas) {
       this.canvas = document.createElement('canvas');
-      const chartContainer = container.querySelector('.vfc-chart-container') as HTMLElement;
       if (chartContainer) {
         chartContainer.appendChild(this.canvas);
       } else {
@@ -138,12 +133,13 @@ export class Chart {
 
     this.options = {
       width: options.width || container.clientWidth || 800,
-      height: options.height || container.clientHeight || 600,
+      height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
       showGrid: options.showGrid ?? true,
       showBounds: options.showBounds ?? false,
+      showVolumeFootprint: options.showVolumeFootprint ?? true,
       tickSize: options.tickSize || 10,
-      initialZoomX: options.initialZoomX || 1,
-      initialZoomY: options.initialZoomY || 1,
+      initialZoomX: options.initialZoomX || 0.55,
+      initialZoomY: options.initialZoomY || 0.55,
       margin: options.margin || this.margin,
       theme: options.theme || {}
     };
@@ -152,6 +148,7 @@ export class Chart {
     this.margin = this.options.margin;
     this.showGrid = this.options.showGrid;
     this.showBounds = this.options.showBounds;
+    this.showVolumeFootprint = this.options.showVolumeFootprint;
     this.view.zoomX = this.options.initialZoomX;
     this.view.zoomY = this.options.initialZoomY;
 
@@ -162,6 +159,7 @@ export class Chart {
       this.view,
       this.options.width,
       this.options.height,
+      this.showVolumeFootprint,
       this.TICK,
       this.baseRowPx,
       this.TEXT_VIS
@@ -189,6 +187,7 @@ export class Chart {
       this.view,
       this.showGrid,
       this.showBounds,
+      this.showVolumeFootprint,
       this.scales,
       this.options.theme,
       this.crosshair,
@@ -219,19 +218,27 @@ export class Chart {
   }
 
   private bindToolbarEvents() {
-    if (this.loadDataBtn) {
-      this.loadDataBtn.addEventListener('click', () => {
-        // This will be handled by external code, but we can provide a default behavior
-        console.log('Load Data clicked - implement external data loading');
-      });
-    }
-
     if (this.resetZoomBtn) {
       this.resetZoomBtn.addEventListener('click', () => {
-        this.updateOptions({
-          width: this.options.width,
-          height: this.options.height
-        });
+        // Reset view to show the end of the data, like initial load
+        if (this.data.length > 0) {
+          this.updateOptions({
+            width: this.options.width,
+            height: this.options.height
+          });
+          // After updating options, set view to show last candles
+          const s = this.scales.scaledSpacing();
+          const contentW = this.options.width - this.margin.left - this.margin.right;
+          const visibleCount = Math.ceil(contentW / s);
+          const startIndex = Math.max(0, this.data.length - visibleCount);
+          this.view.offsetX = startIndex * s;
+          // Center the last candle's close price vertically at canvas center
+          const lastPrice = this.lastPrice!;
+          const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
+          const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
+          this.view.offsetRows = centerRow - priceRow;
+          this.drawing.drawAll();
+        }
       });
     }
 
@@ -243,14 +250,13 @@ export class Chart {
       });
     }
 
-    if (this.toggleBoundsBtn) {
-      this.toggleBoundsBtn.addEventListener('click', () => {
+    if (this.toggleVolumeFootprintBtn) {
+      this.toggleVolumeFootprintBtn.addEventListener('click', () => {
         this.updateOptions({
-          showBounds: !this.options.showBounds
+          showVolumeFootprint: !this.options.showVolumeFootprint
         });
       });
     }
-
 
     if (this.measureBtn) {
       this.measureBtn.addEventListener('click', () => {
@@ -282,6 +288,35 @@ export class Chart {
       this.options.width = container.clientWidth || this.options.width;
       this.options.height = container.clientHeight || this.options.height;
     }
+
+    // Recreate scales and drawing with new dimensions
+    this.scales = new Scales(
+      this.data,
+      this.margin,
+      this.view,
+      this.options.width,
+      this.options.height,
+      this.showVolumeFootprint,
+      this.TICK,
+      this.baseRowPx,
+      this.TEXT_VIS
+    );
+
+    this.drawing = new Drawing(
+      this.ctx,
+      this.data,
+      this.margin,
+      this.view,
+      this.showGrid,
+      this.showBounds,
+      this.showVolumeFootprint,
+      this.scales,
+      this.options.theme,
+      this.crosshair,
+      this.lastPrice,
+      this.interactions
+    );
+
     this.setupCanvas();
     this.drawing.drawAll();
   }
@@ -303,6 +338,7 @@ export class Chart {
       this.view,
       this.options.width,
       this.options.height,
+      this.showVolumeFootprint,
       this.TICK,
       this.baseRowPx,
       this.TEXT_VIS
@@ -315,6 +351,7 @@ export class Chart {
       this.view,
       this.showGrid,
       this.showBounds,
+      this.showVolumeFootprint,
       this.scales,
       this.options.theme,
       this.crosshair,
@@ -329,17 +366,58 @@ export class Chart {
         const visibleCount = Math.ceil(contentW / s);
         const startIndex = Math.max(0, data.length - visibleCount);
         this.view.offsetX = startIndex * s;
-        // Center the last candle's close price vertically
-        const lastPrice = this.lastPrice!; // We know it's not null at this point
-        const totalRows = Math.floor(this.scales.chartHeight() / this.scales.rowHeightPx());
-        const centerRow = totalRows / 2;
-        this.view.offsetRows = centerRow - (this.scales.priceToRowIndex(lastPrice) - centerRow);
+        // Center the last candle's close price vertically at canvas center
+        const lastPrice = this.lastPrice!;
+        const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
+        const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
+        this.view.offsetRows = centerRow - priceRow;
     }
     this.drawing.drawAll();
   }
 
   public updateOptions(options: Partial<VFCOptions>) {
+    const oldShowVolumeFootprint = this.showVolumeFootprint;
     Object.assign(this.options, options);
+    this.showGrid = this.options.showGrid;
+    this.showBounds = this.options.showBounds;
+    this.showVolumeFootprint = this.options.showVolumeFootprint;
+
+    // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
+    if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
+      const oldSpacing = oldShowVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
+      const newSpacing = this.showVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
+      const startIndex = Math.floor(this.view.offsetX / oldSpacing);
+      this.view.offsetX = startIndex * newSpacing;
+    }
+
+    // Recreate Scales first, then Drawing
+    this.scales = new Scales(
+      this.data,
+      this.margin,
+      this.view,
+      this.options.width,
+      this.options.height,
+      this.showVolumeFootprint,
+      this.TICK,
+      this.baseRowPx,
+      this.TEXT_VIS
+    );
+
+    this.drawing = new Drawing(
+      this.ctx,
+      this.data,
+      this.margin,
+      this.view,
+      this.showGrid,
+      this.showBounds,
+      this.showVolumeFootprint,
+      this.scales,
+      this.options.theme,
+      this.crosshair,
+      this.lastPrice,
+      this.interactions
+    );
+
     this.layout();
   }
 

@@ -47,6 +47,7 @@ export class VFC {
       height: options.height || container.clientHeight || 600,
       showGrid: options.showGrid ?? true,
       showBounds: options.showBounds ?? false,
+      showVolumeFootprint: options.showVolumeFootprint ?? true,
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 1,
       initialZoomY: options.initialZoomY || 1,

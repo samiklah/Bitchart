@@ -9,12 +9,12 @@ export declare class Chart {
     private view;
     private showGrid;
     private showBounds;
+    private showVolumeFootprint;
     private crosshair;
     private lastPrice;
-    private loadDataBtn;
     private resetZoomBtn;
     private toggleGridBtn;
-    private toggleBoundsBtn;
+    private toggleVolumeFootprintBtn;
     private measureBtn;
     private readonly TICK;
     private readonly BASE_CANDLE;

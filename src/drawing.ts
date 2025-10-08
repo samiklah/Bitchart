@@ -8,6 +8,7 @@ export class Drawing {
   private view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number };
   private showGrid: boolean;
   private showBounds: boolean;
+  private showVolumeFootprint: boolean;
   private scales: Scales;
   private theme: VFCTheme;
   private crosshair: { x: number; y: number; visible: boolean };
@@ -21,6 +22,7 @@ export class Drawing {
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
     showGrid: boolean,
     showBounds: boolean,
+    showVolumeFootprint: boolean,
     scales: Scales,
     theme: VFCTheme,
     crosshair: { x: number; y: number; visible: boolean },
@@ -33,6 +35,7 @@ export class Drawing {
     this.view = view;
     this.showGrid = showGrid;
     this.showBounds = showBounds;
+    this.showVolumeFootprint = showVolumeFootprint;
     this.scales = scales;
     this.theme = theme;
     this.crosshair = crosshair;
@@ -118,15 +121,6 @@ export class Drawing {
     const rectWidth = Math.abs(endX - startX);
     const rectHeight = Math.abs(endY - startY);
 
-    // Draw transparent blue rectangle
-    this.ctx.fillStyle = 'rgba(0, 0, 255, 0.2)'; // Transparent blue
-    this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
-
-    // Draw rectangle border
-    this.ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
-    this.ctx.lineWidth = 1;
-    this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
-
     // Calculate price and time differences using current screen positions
     const startPrice = this.scales.screenYToPrice(startY);
     const endPrice = this.scales.screenYToPrice(endY);
@@ -135,34 +129,66 @@ export class Drawing {
 
     const priceDiff = endPrice - startPrice;
     const timeDiff = endIndex - startIndex;
+    const isPositive = priceDiff >= 0;
 
-    // Draw measurement labels
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = '11px system-ui';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
+    // Draw light green/red rectangle
+    const rectColor = isPositive ? 'rgba(22, 163, 74, 0.2)' : 'rgba(220, 38, 38, 0.2)'; // Light green/red
+    this.ctx.fillStyle = rectColor;
+    this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
 
+    // Draw rectangle border
+    const borderColor = isPositive ? 'rgba(22, 163, 74, 0.8)' : 'rgba(220, 38, 38, 0.8)';
+    this.ctx.strokeStyle = borderColor;
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+
+    // Draw measure data box below the rectangle with all details
     const centerX = rectX + rectWidth / 2;
-    const centerY = rectY + rectHeight / 2;
 
     // Calculate percentage change
     const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
 
-    // Draw price difference with sign
+    // Prepare all text lines
     const priceSign = priceDiff >= 0 ? '+' : '';
     const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
-    this.ctx.fillText(priceText, centerX, centerY - 20);
-
-    // Draw start and end prices
     const startPriceText = `Start: ${startPrice.toFixed(2)}`;
     const endPriceText = `End: ${endPrice.toFixed(2)}`;
-    this.ctx.fillText(startPriceText, centerX, centerY - 5);
-    this.ctx.fillText(endPriceText, centerX, centerY + 5);
-
-    // Draw time difference
     const timeSign = timeDiff >= 0 ? '+' : '';
     const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
-    this.ctx.fillText(timeText, centerX, centerY + 20);
+
+    const lines = [priceText, startPriceText, endPriceText, timeText];
+
+    // Bigger font
+    this.ctx.font = '14px system-ui';
+    const lineHeight = 18;
+    const padding = 8;
+    const maxWidth = Math.max(...lines.map(line => this.ctx.measureText(line).width));
+    const boxWidth = maxWidth + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2;
+    const boxX = centerX - boxWidth / 2;
+    const boxY = rectY + rectHeight + 8;
+
+    // Box colors
+    const boxColor = isPositive ? '#16a34a' : '#dc2626'; // Green for positive, red for negative
+    const textColor = '#ffffff';
+
+    // Draw box background
+    this.ctx.fillStyle = boxColor;
+    this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Draw box border
+    this.ctx.strokeStyle = textColor;
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Draw text lines
+    this.ctx.fillStyle = textColor;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'top';
+    lines.forEach((line, index) => {
+      const y = boxY + padding + index * lineHeight;
+      this.ctx.fillText(line, centerX, y);
+    });
 
     this.ctx.restore();
   }
@@ -269,152 +295,155 @@ export class Drawing {
 
   private drawFootprint(candle: CandleData, i: number, startIndex: number): void {
     const cx = this.scales.indexToX(i, startIndex);
-    const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
-    const enableProfile = rows.length > 3;
+    const half = this.scales.scaledCandle() / 2;
 
-    // Calculate VAH/VAL
-    const levelVols = rows.map(r => r.buy + r.sell);
-    const totalVol = levelVols.reduce((a, b) => a + b, 0);
-    let pocIdx = 0;
-    for (let i = 1; i < levelVols.length; i++) {
-      if (levelVols[i] > levelVols[pocIdx]) pocIdx = i;
-    }
+    if (this.showVolumeFootprint) {
+      const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
+      const enableProfile = rows.length > 3;
 
-    let included = new Set([pocIdx]);
-    if (enableProfile) {
-      let acc = levelVols[pocIdx];
-      let up = pocIdx - 1, down = pocIdx + 1;
-      while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
-        const upVol = up >= 0 ? levelVols[up] : -1;
-        const downVol = down < rows.length ? levelVols[down] : -1;
-        if (upVol >= downVol) {
-          if (up >= 0) { included.add(up); acc += levelVols[up]; up--; }
-          else { included.add(down); acc += levelVols[down]; down++; }
-        } else {
-          if (down < rows.length) { included.add(down); acc += levelVols[down]; down++; }
-          else { included.add(up); acc += levelVols[up]; up--; }
+      // Calculate VAH/VAL
+      const levelVols = rows.map(r => r.buy + r.sell);
+      const totalVol = levelVols.reduce((a, b) => a + b, 0);
+      let pocIdx = 0;
+      for (let i = 1; i < levelVols.length; i++) {
+        if (levelVols[i] > levelVols[pocIdx]) pocIdx = i;
+      }
+
+      let included = new Set([pocIdx]);
+      if (enableProfile) {
+        let acc = levelVols[pocIdx];
+        let up = pocIdx - 1, down = pocIdx + 1;
+        while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
+          const upVol = up >= 0 ? levelVols[up] : -1;
+          const downVol = down < rows.length ? levelVols[down] : -1;
+          if (upVol >= downVol) {
+            if (up >= 0) { included.add(up); acc += levelVols[up]; up--; }
+            else { included.add(down); acc += levelVols[down]; down++; }
+          } else {
+            if (down < rows.length) { included.add(down); acc += levelVols[down]; down++; }
+            else { included.add(up); acc += levelVols[up]; up--; }
+          }
         }
       }
-    }
 
-    const vahIdx = Math.min(...included);
-    const valIdx = Math.max(...included);
-    const VAH = rows[vahIdx]?.price;
-    const VAL = rows[valIdx]?.price;
+      const vahIdx = Math.min(...included);
+      const valIdx = Math.max(...included);
+      const VAH = rows[vahIdx]?.price;
+      const VAL = rows[valIdx]?.price;
 
-    const half = this.scales.scaledCandle() / 2;
-    const leftX = cx - half - this.scales.scaledBox();
-    const rightX = cx + half;
+      const leftX = cx - half - this.scales.scaledBox();
+      const rightX = cx + half;
 
-    const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
-    const buyBase = this.theme.volumeBuyBase ?? 0.15;
-    const sellBase = this.theme.volumeSellBase ?? 0.15;
-    const buyRGBA = (v: number) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
-    const sellRGBA = (v: number) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
+      const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
+      const buyBase = this.theme.volumeBuyBase ?? 0.15;
+      const sellBase = this.theme.volumeSellBase ?? 0.15;
+      const buyRGBA = (v: number) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
+      const sellRGBA = (v: number) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
 
-    let minRow = Infinity, maxRow = -Infinity;
-    let totBuy = 0, totSell = 0;
+      let minRow = Infinity, maxRow = -Infinity;
+      let totBuy = 0, totSell = 0;
 
-    // Draw boxes
-    for (let r = 0; r < rows.length; r++) {
-      const f = rows[r];
-      const row = this.scales.priceToRowIndex(f.price);
-      const yTop = this.scales.rowToY(row - 0.5);
-      const yBot = this.scales.rowToY(row + 0.5);
-      const h = Math.max(1, yBot - yTop);
-      minRow = Math.min(minRow, row - 0.5);
-      maxRow = Math.max(maxRow, row + 0.5);
-      totBuy += f.buy;
-      totSell += f.sell;
-
-      const isPOC = enableProfile && (r === pocIdx);
-      this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : sellRGBA(f.sell);
-      this.ctx.fillRect(leftX, yTop, this.scales.scaledBox(), h);
-      this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : buyRGBA(f.buy);
-      this.ctx.fillRect(rightX, yTop, this.scales.scaledBox(), h);
-    }
-
-    // Imbalance markers
-    for (let r = 0; r < rows.length; r++) {
-      const f = rows[r];
-      const prev = rows[r - 1];
-      const next = rows[r + 1];
-      const row = this.scales.priceToRowIndex(f.price);
-      const yTop = this.scales.rowToY(row - 0.5);
-      const yBot = this.scales.rowToY(row + 0.5);
-      const h = Math.max(1, yBot - yTop);
-      if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
-        this.ctx.fillStyle = this.theme.imbalanceSell || '#dc2626';
-        this.ctx.fillRect(leftX - this.scales.scaledImb() - 1, yTop, this.scales.scaledImb(), h);
-      }
-      if (next && f.buy >= 3 * Math.max(1, next.sell)) {
-        this.ctx.fillStyle = this.theme.imbalanceBuy || '#16a34a';
-        this.ctx.fillRect(rightX + this.scales.scaledBox() + 1, yTop, this.scales.scaledImb(), h);
-      }
-    }
-
-    // Volume numbers
-    if (this.scales.shouldShowCellText()) {
-      const fontSize = Math.max(8, Math.min(16, 11 * this.view.zoomX));
-      this.ctx.font = `${fontSize}px system-ui`;
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
+      // Draw boxes
       for (let r = 0; r < rows.length; r++) {
         const f = rows[r];
         const row = this.scales.priceToRowIndex(f.price);
-        const y = this.scales.rowToY(row);
+        const yTop = this.scales.rowToY(row - 0.5);
+        const yBot = this.scales.rowToY(row + 0.5);
+        const h = Math.max(1, yBot - yTop);
+        minRow = Math.min(minRow, row - 0.5);
+        maxRow = Math.max(maxRow, row + 0.5);
+        totBuy += f.buy;
+        totSell += f.sell;
+
         const isPOC = enableProfile && (r === pocIdx);
-        this.ctx.fillStyle = isPOC ? (this.theme.pocTextColor || this.theme.textColorBright || '#ffffff') : (this.theme.textColorBright || '#ddd');
-        this.ctx.fillText(this.scales.formatK(f.sell), leftX + this.scales.scaledBox() / 2, y);
-        this.ctx.fillText(this.scales.formatK(f.buy), rightX + this.scales.scaledBox() / 2, y);
+        this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : sellRGBA(f.sell);
+        this.ctx.fillRect(leftX, yTop, this.scales.scaledBox(), h);
+        this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : buyRGBA(f.buy);
+        this.ctx.fillRect(rightX, yTop, this.scales.scaledBox(), h);
+      }
+
+      // Imbalance markers
+      for (let r = 0; r < rows.length; r++) {
+        const f = rows[r];
+        const prev = rows[r - 1];
+        const next = rows[r + 1];
+        const row = this.scales.priceToRowIndex(f.price);
+        const yTop = this.scales.rowToY(row - 0.5);
+        const yBot = this.scales.rowToY(row + 0.5);
+        const h = Math.max(1, yBot - yTop);
+        if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
+          this.ctx.fillStyle = this.theme.imbalanceSell || '#dc2626';
+          this.ctx.fillRect(leftX - this.scales.scaledImb() - 1, yTop, this.scales.scaledImb(), h);
+        }
+        if (next && f.buy >= 3 * Math.max(1, next.sell)) {
+          this.ctx.fillStyle = this.theme.imbalanceBuy || '#16a34a';
+          this.ctx.fillRect(rightX + this.scales.scaledBox() + 1, yTop, this.scales.scaledImb(), h);
+        }
+      }
+
+      // Volume numbers
+      if (this.scales.shouldShowCellText()) {
+        const fontSize = Math.max(8, Math.min(16, 11 * this.view.zoomX));
+        this.ctx.font = `${fontSize}px system-ui`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        for (let r = 0; r < rows.length; r++) {
+          const f = rows[r];
+          const row = this.scales.priceToRowIndex(f.price);
+          const y = this.scales.rowToY(row);
+          const isPOC = enableProfile && (r === pocIdx);
+          this.ctx.fillStyle = isPOC ? (this.theme.pocTextColor || this.theme.textColorBright || '#ffffff') : (this.theme.textColorBright || '#ddd');
+          this.ctx.fillText(this.scales.formatK(f.sell), leftX + this.scales.scaledBox() / 2, y);
+          this.ctx.fillText(this.scales.formatK(f.buy), rightX + this.scales.scaledBox() / 2, y);
+        }
+      }
+
+      // VAH/VAL lines and labels
+      if (enableProfile && this.scales.shouldShowCellText()) {
+        const rVah = this.scales.priceToRowIndex(VAH), rVal = this.scales.priceToRowIndex(VAL);
+        const yVah = this.scales.rowToY(rVah - 0.5);
+        const yVal = this.scales.rowToY(rVal + 0.5);
+        const rightEdge = rightX + this.scales.scaledBox();
+
+        this.ctx.save();
+        this.ctx.setLineDash([4, 2]);
+        this.ctx.strokeStyle = this.theme.vahValColor || '#9ca3af';
+        this.ctx.beginPath();
+        this.ctx.moveTo(leftX, yVah);
+        this.ctx.lineTo(rightEdge, yVah);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(leftX, yVal);
+        this.ctx.lineTo(rightEdge, yVal);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        const vahFontSize = Math.max(6, Math.min(12, 8 * this.view.zoomX));
+        this.ctx.fillStyle = this.theme.vahValLabelColor || '#cfd3d6';
+        this.ctx.font = `${vahFontSize}px monospace`;
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'middle';
+        const labelX = cx - half - this.scales.scaledBox() + 3;
+        this.ctx.fillText('VAH', labelX, yVah);
+        this.ctx.fillText('VAL', labelX, yVal);
+        this.ctx.restore();
+      }
+
+      // Delta/Total labels
+      if (this.scales.shouldShowCellText()) {
+        const yLowFootprint = this.scales.rowToY(maxRow) + 2;
+        const delta = totBuy - totSell;
+        const deltaFontSize = Math.max(8, Math.min(18, 12 * this.view.zoomX));
+        this.ctx.textAlign = 'center';
+        this.ctx.font = `${deltaFontSize}px system-ui`;
+        this.ctx.fillStyle = delta >= 0 ? (this.theme.deltaPositive || '#16a34a') : (this.theme.deltaNegative || '#dc2626');
+        this.ctx.fillText(`Delta ${this.scales.formatK(delta)}`, cx, yLowFootprint + 14);
+        this.ctx.fillStyle = this.theme.totalColor || '#fff';
+        this.ctx.fillText(`Total ${this.scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
       }
     }
 
-    // VAH/VAL lines and labels
-    if (enableProfile && this.scales.shouldShowCellText()) {
-      const rVah = this.scales.priceToRowIndex(VAH), rVal = this.scales.priceToRowIndex(VAL);
-      const yVah = this.scales.rowToY(rVah - 0.5);
-      const yVal = this.scales.rowToY(rVal + 0.5);
-      const rightEdge = rightX + this.scales.scaledBox();
-
-      this.ctx.save();
-      this.ctx.setLineDash([4, 2]);
-      this.ctx.strokeStyle = this.theme.vahValColor || '#9ca3af';
-      this.ctx.beginPath();
-      this.ctx.moveTo(leftX, yVah);
-      this.ctx.lineTo(rightEdge, yVah);
-      this.ctx.stroke();
-      this.ctx.beginPath();
-      this.ctx.moveTo(leftX, yVal);
-      this.ctx.lineTo(rightEdge, yVal);
-      this.ctx.stroke();
-      this.ctx.setLineDash([]);
-
-      const vahFontSize = Math.max(6, Math.min(12, 8 * this.view.zoomX));
-      this.ctx.fillStyle = this.theme.vahValLabelColor || '#cfd3d6';
-      this.ctx.font = `${vahFontSize}px monospace`;
-      this.ctx.textAlign = 'left';
-      this.ctx.textBaseline = 'middle';
-      const labelX = cx - half - this.scales.scaledBox() + 3;
-      this.ctx.fillText('VAH', labelX, yVah);
-      this.ctx.fillText('VAL', labelX, yVal);
-      this.ctx.restore();
-    }
-
-    // Delta/Total labels
-    if (this.scales.shouldShowCellText()) {
-      const yLowFootprint = this.scales.rowToY(maxRow) + 2;
-      const delta = totBuy - totSell;
-      const deltaFontSize = Math.max(8, Math.min(18, 12 * this.view.zoomX));
-      this.ctx.textAlign = 'center';
-      this.ctx.font = `${deltaFontSize}px system-ui`;
-      this.ctx.fillStyle = delta >= 0 ? (this.theme.deltaPositive || '#16a34a') : (this.theme.deltaNegative || '#dc2626');
-      this.ctx.fillText(`Delta ${this.scales.formatK(delta)}`, cx, yLowFootprint + 14);
-      this.ctx.fillStyle = this.theme.totalColor || '#fff';
-      this.ctx.fillText(`Total ${this.scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
-    }
-
-    // Wick & body
+    // Wick & body (always drawn)
     const yHigh = this.scales.priceToY(candle.high);
     const yLow = this.scales.priceToY(candle.low);
     const yOpen = this.scales.priceToY(candle.open);

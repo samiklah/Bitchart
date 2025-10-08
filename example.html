@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Volume Footprint Price Chart</title>
   <link rel="stylesheet" href="src/styles.css">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #container {
+      height: 100%;
+    }
+  </style>
 </head>
 <body>
  <div id="container">
@@ -22,20 +31,12 @@
   // Create chart using the VFC Chart class directly
   const chart = new bitchart.VFC(container, {
      width: window.innerWidth,
-     height: window.innerHeight - 60, // Account for toolbar
+     // height will be automatically set from the container
      showGrid: true
    });
 
    // Generate demo data
    const candles = makeDemoCandles();
-
-   // Set up event listeners for Load Data button (others are handled automatically by the chart)
-   const loadDataBtn = document.getElementById('loadData');
-   if (loadDataBtn) {
-     loadDataBtn.addEventListener('click', () => {
-       chart.setData(candles);
-     });
-   }
 
    // Load initial data - shows the end of the data
    chart.setData(candles);

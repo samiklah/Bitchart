@@ -41,6 +41,7 @@ export interface VFCOptions {
     height?: number;
     showGrid?: boolean;
     showBounds?: boolean;
+    showVolumeFootprint?: boolean;
     tickSize?: number;
     initialZoomX?: number;
     initialZoomY?: number;
