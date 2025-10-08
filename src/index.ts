@@ -1,3 +1,8 @@
+/**
+ * Main entry point for the Volume Footprint Chart library.
+ * Exports the primary API, types, and backward-compatible aliases.
+ */
+
 import { CandleData, VFCOptions, VFCEvents } from './types';
 import { Chart } from './chart';
 

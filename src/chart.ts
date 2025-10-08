@@ -1,44 +1,49 @@
+/**
+ * Main chart implementation for the Volume Footprint Chart.
+ * Provides the primary API for creating and managing chart instances with modular components.
+ */
+
 import { CandleData, VFCOptions, VFCEvents } from './types';
 import { Scales } from './scales';
 import { Interactions } from './interactions';
 import { Drawing } from './drawing';
 
 export class Chart {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private data: CandleData[] = [];
-  private options: Required<VFCOptions>;
-  private events: VFCEvents = {};
+    private canvas!: HTMLCanvasElement;
+    private ctx!: CanvasRenderingContext2D;
+    private data: CandleData[] = [];
+    private options!: Required<VFCOptions>;
+   private events: VFCEvents = {};
 
-  // Chart state
-  private margin = { top: 0, bottom: 40, left: 0, right: 70 };
-  private view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
-  private showGrid = true;
-  private showBounds = false;
-  private showVolumeFootprint = true;
-  private crosshair = { x: -1, y: -1, visible: false };
-  private lastPrice: number | null = null;
+   // Chart state
+   private margin = { top: 0, bottom: 40, left: 0, right: 70 };
+   private view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
+   private showGrid = true;
+   private showBounds = false;
+   private showVolumeFootprint = true;
+   private crosshair = { x: -1, y: -1, visible: false };
+   private lastPrice: number | null = null;
 
-  // Toolbar button references
-  private resetZoomBtn: HTMLButtonElement | null = null;
-  private toggleGridBtn: HTMLButtonElement | null = null;
-  private toggleVolumeFootprintBtn: HTMLButtonElement | null = null;
-  private measureBtn: HTMLButtonElement | null = null;
+   // Toolbar button references
+   private resetZoomBtn: HTMLButtonElement | null = null;
+   private toggleGridBtn: HTMLButtonElement | null = null;
+   private toggleVolumeFootprintBtn: HTMLButtonElement | null = null;
+   private measureBtn: HTMLButtonElement | null = null;
 
-  // Constants
-  private readonly TICK = 10;
-  private readonly BASE_CANDLE = 15;
-  private readonly BASE_BOX = 55;
-  private readonly BASE_IMBALANCE = 2;
-  private readonly BASE_SPACING = this.BASE_CANDLE + 2 * this.BASE_BOX + 2 * this.BASE_IMBALANCE;
-  private readonly FIXED_GAP = 4;
-  private readonly baseRowPx = 22;
-  private readonly TEXT_VIS = { minZoomX: 0.5, minRowPx: 10, minBoxPx: 20 };
+   // Constants
+   private readonly TICK = 10;
+   private readonly BASE_CANDLE = 15;
+   private readonly BASE_BOX = 55;
+   private readonly BASE_IMBALANCE = 2;
+   private readonly BASE_SPACING = this.BASE_CANDLE + 2 * this.BASE_BOX + 2 * this.BASE_IMBALANCE;
+   private readonly FIXED_GAP = 4;
+   private readonly baseRowPx = 22;
+   private readonly TEXT_VIS = { minZoomX: 0.5, minRowPx: 10, minBoxPx: 20 };
 
-  // Modules
-  private scales: Scales;
-  private interactions: Interactions;
-  private drawing: Drawing;
+   // Modules
+   private scales!: Scales;
+   private interactions!: Interactions;
+   private drawing!: Drawing;
 
   private createChartStructure(container: HTMLElement): void {
     // Check if toolbars already exist
@@ -108,13 +113,12 @@ export class Chart {
     this.measureBtn = measureBtn;
   }
 
-  constructor(container: HTMLElement, options: VFCOptions = {}, events: VFCEvents = {}) {
-    // Create the complete chart structure with toolbars
-    this.createChartStructure(container);
-
-    // Get the chart container for accurate dimensions
-    const chartContainer = container.querySelector('.vfc-chart-container') as HTMLElement;
-
+  /**
+   * Initializes the canvas element and context.
+   * @param container The container element
+   * @param chartContainer The chart container element
+   */
+  private initializeCanvas(container: HTMLElement, chartContainer: HTMLElement): void {
     // Use existing canvas if available, otherwise create one
     this.canvas = container.querySelector('canvas') as HTMLCanvasElement;
     if (!this.canvas) {
@@ -130,7 +134,15 @@ export class Chart {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context not available');
     this.ctx = ctx;
+  }
 
+  /**
+   * Initializes chart options with defaults and user-provided values.
+   * @param options User-provided options
+   * @param container The container element
+   * @param chartContainer The chart container element
+   */
+  private initializeOptions(options: VFCOptions, container: HTMLElement, chartContainer: HTMLElement): void {
     this.options = {
       width: options.width || container.clientWidth || 800,
       height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
@@ -144,15 +156,18 @@ export class Chart {
       theme: options.theme || {}
     };
 
-    this.events = events;
     this.margin = this.options.margin;
     this.showGrid = this.options.showGrid;
     this.showBounds = this.options.showBounds;
     this.showVolumeFootprint = this.options.showVolumeFootprint;
     this.view.zoomX = this.options.initialZoomX;
     this.view.zoomY = this.options.initialZoomY;
+  }
 
-    // Initialize modules
+  /**
+   * Initializes the chart modules (Scales, Interactions, Drawing).
+   */
+  private initializeModules(): void {
     this.scales = new Scales(
       this.data,
       this.margin,
@@ -179,7 +194,6 @@ export class Chart {
       this.scales
     );
 
-
     this.drawing = new Drawing(
       this.ctx,
       this.data,
@@ -194,7 +208,28 @@ export class Chart {
       this.lastPrice,
       this.interactions
     );
+  }
 
+  constructor(container: HTMLElement, options: VFCOptions = {}, events: VFCEvents = {}) {
+    // Create the complete chart structure with toolbars
+    this.createChartStructure(container);
+
+    // Get the chart container for accurate dimensions
+    const chartContainer = container.querySelector('.vfc-chart-container') as HTMLElement;
+
+    // Initialize canvas
+    this.initializeCanvas(container, chartContainer);
+
+    // Initialize options
+    this.initializeOptions(options, container, chartContainer);
+
+    // Set events
+    this.events = events;
+
+    // Initialize modules
+    this.initializeModules();
+
+    // Set up canvas and event handlers
     this.setupCanvas();
     this.bindEvents();
     this.bindToolbarEvents();
@@ -324,13 +359,13 @@ export class Chart {
   // Public API
   public setData(data: CandleData[]) {
     this.data = data;
-    
+
     // Calculate lastPrice first, before creating Drawing instance
     if (data.length > 0) {
         const lastPrice = data[data.length - 1].close;
         this.lastPrice = lastPrice;
     }
-    
+
     // Update scales with new data
     this.scales = new Scales(
       this.data,
@@ -343,7 +378,7 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS
     );
-    
+
     this.drawing = new Drawing(
       this.ctx,
       this.data,

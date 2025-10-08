@@ -1,5 +1,9 @@
 import { CandleData, VFCTheme } from './types';
 import { Scales } from './scales';
+/**
+ * Handles all rendering operations for the Volume Footprint Chart.
+ * Responsible for drawing grid, chart elements, scales, crosshair, and measurements.
+ */
 export declare class Drawing {
     private ctx;
     private data;
@@ -29,12 +33,5 @@ export declare class Drawing {
         visible: boolean;
     }, lastPrice: number | null, interactions: any);
     drawAll(): void;
-    private drawGrid;
     private drawChart;
-    private drawMeasureRectangle;
-    private drawScales;
-    private drawBounds;
-    private drawFootprint;
-    private drawCrosshair;
-    private drawCurrentPriceLabel;
 }

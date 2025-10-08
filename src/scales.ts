@@ -1,5 +1,15 @@
-import { CandleData } from './types';
+/**
+ * Provides coordinate transformation and scaling utilities for the chart.
+ * Converts between screen pixels, data indices, and price values with zoom and pan support.
+ */
 
+import { CandleData } from './types';
+import { formatNumber } from './helpers/utils';
+
+/**
+ * Handles coordinate transformations and scaling calculations for the chart.
+ * Provides methods to convert between screen coordinates, data indices, and price levels.
+ */
 export class Scales {
   private data: CandleData[] = [];
   private margin: { top: number; bottom: number; left: number; right: number };
@@ -11,6 +21,18 @@ export class Scales {
   private baseRowPx: number;
   private TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number };
 
+  /**
+   * Creates a Scales instance for coordinate transformations.
+   * @param data Array of candlestick data
+   * @param margin Chart margin configuration
+   * @param view Current view state
+   * @param canvasWidth Canvas width in pixels
+   * @param canvasHeight Canvas height in pixels
+   * @param showVolumeFootprint Whether volume footprint is displayed
+   * @param TICK Price tick size
+   * @param baseRowPx Base row height in pixels
+   * @param TEXT_VIS Text visibility thresholds
+   */
   constructor(
     data: CandleData[],
     margin: { top: number; bottom: number; left: number; right: number },
@@ -33,14 +55,17 @@ export class Scales {
     this.TEXT_VIS = TEXT_VIS;
   }
 
+  /** Returns the height of the chart area in pixels (excluding margins). */
   chartHeight(): number {
     return this.canvasHeight - this.margin.top - this.margin.bottom;
   }
 
+  /** Returns the current row height in pixels, adjusted for zoom. */
   rowHeightPx(): number {
     return this.baseRowPx * this.view.zoomY;
   }
 
+  /** Returns the scaled spacing between candles, depending on volume footprint mode. */
   scaledSpacing(): number {
     if (!this.showVolumeFootprint) {
       return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
@@ -123,10 +148,7 @@ export class Scales {
   }
 
   formatK(v: number): string {
-    const a = Math.abs(v);
-    if (a >= 1e6) return (v / 1e6).toFixed(2) + "M";
-    if (a >= 1e3) return (v / 1e3).toFixed(2) + "K";
-    return Math.round(v).toString();
+    return formatNumber(v);
   }
 
   private get xShift(): number {

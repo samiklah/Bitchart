@@ -1,3 +1,7 @@
+/**
+ * Main chart implementation for the Volume Footprint Chart.
+ * Provides the primary API for creating and managing chart instances with modular components.
+ */
 import { CandleData, VFCOptions, VFCEvents } from './types';
 export declare class Chart {
     private canvas;
@@ -29,6 +33,23 @@ export declare class Chart {
     private drawing;
     private createChartStructure;
     private setupToolbarEventHandlers;
+    /**
+     * Initializes the canvas element and context.
+     * @param container The container element
+     * @param chartContainer The chart container element
+     */
+    private initializeCanvas;
+    /**
+     * Initializes chart options with defaults and user-provided values.
+     * @param options User-provided options
+     * @param container The container element
+     * @param chartContainer The chart container element
+     */
+    private initializeOptions;
+    /**
+     * Initializes the chart modules (Scales, Interactions, Drawing).
+     */
+    private initializeModules;
     constructor(container: HTMLElement, options?: VFCOptions, events?: VFCEvents);
     private setupCanvas;
     private bindEvents;

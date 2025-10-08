@@ -4,7 +4,113 @@
     (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.bitchart = {}));
 })(this, (function (exports) { 'use strict';
 
+    /**
+     * Utility functions and helpers for the Volume Footprint Chart library.
+     * Contains reusable calculations for volume analysis, color mapping, and number formatting.
+     */
+    /**
+     * Creates color mapping functions for buy and sell volumes based on opacity scaling.
+     * @param sideMax Maximum volume on either buy or sell side
+     * @param buyBase Base opacity for buy volumes
+     * @param sellBase Base opacity for sell volumes
+     * @returns Object with buyRGBA and sellRGBA functions
+     */
+    function createVolumeColorMappers(sideMax, buyBase = 0.15, sellBase = 0.15) {
+        const buyRGBA = (v) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
+        const sellRGBA = (v) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
+        return { buyRGBA, sellRGBA };
+    }
+    /**
+     * Formats a number with K/M/T suffixes for large values.
+     * @param v The number to format
+     * @returns Formatted string
+     */
+    function formatNumber(v) {
+        const a = Math.abs(v);
+        if (a >= 1e12)
+            return (v / 1e12).toFixed(2) + "T";
+        if (a >= 1e6)
+            return (v / 1e6).toFixed(2) + "M";
+        if (a >= 1e3)
+            return (v / 1e3).toFixed(2) + "K";
+        return Math.round(v).toString();
+    }
+    /**
+     * Calculates the Point of Control (POC) and Value Area (VAH/VAL) for volume profile analysis.
+     * @param rows Sorted footprint levels (high to low price)
+     * @returns Object containing POC index, VAH/VAL indices and prices, and total volume
+     */
+    function computeVolumeArea(rows) {
+        var _a, _b;
+        const levelVols = rows.map(r => r.buy + r.sell);
+        const totalVol = levelVols.reduce((a, b) => a + b, 0);
+        let pocIdx = 0;
+        for (let i = 1; i < levelVols.length; i++) {
+            if (levelVols[i] > levelVols[pocIdx])
+                pocIdx = i;
+        }
+        let included = new Set([pocIdx]);
+        const enableProfile = rows.length > 3;
+        if (enableProfile) {
+            let acc = levelVols[pocIdx];
+            let up = pocIdx - 1, down = pocIdx + 1;
+            while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
+                const upVol = up >= 0 ? levelVols[up] : -1;
+                const downVol = down < rows.length ? levelVols[down] : -1;
+                if (upVol >= downVol) {
+                    if (up >= 0) {
+                        included.add(up);
+                        acc += levelVols[up];
+                        up--;
+                    }
+                    else {
+                        included.add(down);
+                        acc += levelVols[down];
+                        down++;
+                    }
+                }
+                else {
+                    if (down < rows.length) {
+                        included.add(down);
+                        acc += levelVols[down];
+                        down++;
+                    }
+                    else {
+                        included.add(up);
+                        acc += levelVols[up];
+                        up--;
+                    }
+                }
+            }
+        }
+        const vahIdx = Math.min(...included);
+        const valIdx = Math.max(...included);
+        const VAH = (_a = rows[vahIdx]) === null || _a === void 0 ? void 0 : _a.price;
+        const VAL = (_b = rows[valIdx]) === null || _b === void 0 ? void 0 : _b.price;
+        return { pocIdx, vahIdx, valIdx, VAH, VAL, totalVol };
+    }
+
+    /**
+     * Provides coordinate transformation and scaling utilities for the chart.
+     * Converts between screen pixels, data indices, and price values with zoom and pan support.
+     */
+    /**
+     * Handles coordinate transformations and scaling calculations for the chart.
+     * Provides methods to convert between screen coordinates, data indices, and price levels.
+     */
     class Scales {
+        /**
+         * Creates a Scales instance for coordinate transformations.
+         * @param data Array of candlestick data
+         * @param margin Chart margin configuration
+         * @param view Current view state
+         * @param canvasWidth Canvas width in pixels
+         * @param canvasHeight Canvas height in pixels
+         * @param showVolumeFootprint Whether volume footprint is displayed
+         * @param TICK Price tick size
+         * @param baseRowPx Base row height in pixels
+         * @param TEXT_VIS Text visibility thresholds
+         */
         constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS) {
             this.data = [];
             this.data = data;
@@ -17,12 +123,15 @@
             this.baseRowPx = baseRowPx;
             this.TEXT_VIS = TEXT_VIS;
         }
+        /** Returns the height of the chart area in pixels (excluding margins). */
         chartHeight() {
             return this.canvasHeight - this.margin.top - this.margin.bottom;
         }
+        /** Returns the current row height in pixels, adjusted for zoom. */
         rowHeightPx() {
             return this.baseRowPx * this.view.zoomY;
         }
+        /** Returns the scaled spacing between candles, depending on volume footprint mode. */
         scaledSpacing() {
             if (!this.showVolumeFootprint) {
                 return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
@@ -88,12 +197,7 @@
             return out;
         }
         formatK(v) {
-            const a = Math.abs(v);
-            if (a >= 1e6)
-                return (v / 1e6).toFixed(2) + "M";
-            if (a >= 1e3)
-                return (v / 1e3).toFixed(2) + "K";
-            return Math.round(v).toString();
+            return formatNumber(v);
         }
         get xShift() {
             const s = this.scaledSpacing();
@@ -127,7 +231,24 @@
         }
     }
 
+    /**
+     * Manages user interactions and input handling for the Volume Footprint Chart.
+     * Processes mouse/touch events, wheel zooming, panning, and measurement tools.
+     */
+    /**
+     * Handles user interactions with the chart, including mouse/touch events, zooming, panning, and measuring.
+     * Manages crosshair positioning, momentum scrolling, and measurement tools.
+     */
     class Interactions {
+        /**
+         * Creates an Interactions instance to handle user input for the chart.
+         * @param canvas The HTML canvas element
+         * @param margin Chart margin configuration
+         * @param view Current view state (zoom and offset)
+         * @param events Event callbacks
+         * @param crosshair Crosshair position state
+         * @param scales Scales instance for coordinate conversions
+         */
         constructor(canvas, margin, view, events, crosshair, scales) {
             this.momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
             this.PAN_INVERT = { x: true, y: false };
@@ -142,6 +263,11 @@
             this.scales = scales;
             this.setupMouseTracking();
         }
+        /**
+         * Handles mouse wheel events for zooming different chart areas.
+         * Zooms price axis when over price bar, time axis when over timeline, both when over chart body.
+         * @param e The wheel event
+         */
         handleWheel(e) {
             var _a, _b, _c, _d, _e, _f;
             e.preventDefault();
@@ -339,6 +465,507 @@
         }
     }
 
+    /**
+     * Footprint-specific drawing functions for the Volume Footprint Chart.
+     * Handles rendering of volume profiles, imbalance markers, and related visualizations.
+     */
+    /**
+     * Draws the footprint volume boxes for buy and sell volumes at each price level.
+     */
+    function drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme) {
+        var _a, _b;
+        const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
+        const buyBase = (_a = theme.volumeBuyBase) !== null && _a !== void 0 ? _a : 0.15;
+        const sellBase = (_b = theme.volumeSellBase) !== null && _b !== void 0 ? _b : 0.15;
+        const { buyRGBA, sellRGBA } = createVolumeColorMappers(sideMax, buyBase, sellBase);
+        let minRow = Infinity, maxRow = -Infinity;
+        let totBuy = 0, totSell = 0;
+        for (let r = 0; r < rows.length; r++) {
+            const f = rows[r];
+            const row = scales.priceToRowIndex(f.price);
+            const yTop = scales.rowToY(row - 0.5);
+            const yBot = scales.rowToY(row + 0.5);
+            const h = Math.max(1, yBot - yTop);
+            minRow = Math.min(minRow, row - 0.5);
+            maxRow = Math.max(maxRow, row + 0.5);
+            totBuy += f.buy;
+            totSell += f.sell;
+            const isPOC = enableProfile && (r === pocIdx);
+            ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
+            ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
+            ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
+            ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+        }
+        return { minRow, maxRow, totBuy, totSell };
+    }
+    /**
+     * Draws imbalance markers for levels where buy or sell volume significantly exceeds adjacent levels.
+     */
+    function drawImbalanceMarkers(ctx, rows, leftX, rightX, scales, theme) {
+        for (let r = 0; r < rows.length; r++) {
+            const f = rows[r];
+            const prev = rows[r - 1];
+            const next = rows[r + 1];
+            const row = scales.priceToRowIndex(f.price);
+            const yTop = scales.rowToY(row - 0.5);
+            const yBot = scales.rowToY(row + 0.5);
+            const h = Math.max(1, yBot - yTop);
+            if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
+                ctx.fillStyle = theme.imbalanceSell || '#dc2626';
+                ctx.fillRect(leftX - scales.scaledImb() - 1, yTop, scales.scaledImb(), h);
+            }
+            if (next && f.buy >= 3 * Math.max(1, next.sell)) {
+                ctx.fillStyle = theme.imbalanceBuy || '#16a34a';
+                ctx.fillRect(rightX + scales.scaledBox() + 1, yTop, scales.scaledImb(), h);
+            }
+        }
+    }
+    /**
+     * Draws volume numbers inside the footprint boxes.
+     */
+    function drawVolumeNumbers(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme, zoomX) {
+        const fontSize = Math.max(8, Math.min(16, 11 * zoomX));
+        ctx.font = `${fontSize}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (let r = 0; r < rows.length; r++) {
+            const f = rows[r];
+            const row = scales.priceToRowIndex(f.price);
+            const y = scales.rowToY(row);
+            const isPOC = enableProfile && (r === pocIdx);
+            ctx.fillStyle = isPOC ? (theme.pocTextColor || theme.textColorBright || '#ffffff') : (theme.textColorBright || '#ddd');
+            ctx.fillText(scales.formatK(f.sell), leftX + scales.scaledBox() / 2, y);
+            ctx.fillText(scales.formatK(f.buy), rightX + scales.scaledBox() / 2, y);
+        }
+    }
+    /**
+     * Draws the Value Area High (VAH) and Value Area Low (VAL) boundary lines and labels.
+     */
+    function drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, zoomX) {
+        const rVah = scales.priceToRowIndex(VAH), rVal = scales.priceToRowIndex(VAL);
+        const yVah = scales.rowToY(rVah - 0.5);
+        const yVal = scales.rowToY(rVal + 0.5);
+        const rightEdge = rightX + scales.scaledBox();
+        ctx.save();
+        ctx.setLineDash([4, 2]);
+        ctx.strokeStyle = theme.vahValColor || '#9ca3af';
+        ctx.beginPath();
+        ctx.moveTo(leftX, yVah);
+        ctx.lineTo(rightEdge, yVah);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(leftX, yVal);
+        ctx.lineTo(rightEdge, yVal);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const vahFontSize = Math.max(6, Math.min(12, 8 * zoomX));
+        ctx.fillStyle = theme.vahValLabelColor || '#cfd3d6';
+        ctx.font = `${vahFontSize}px monospace`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const labelX = cx - half - scales.scaledBox() + 3;
+        ctx.fillText('VAH', labelX, yVah);
+        ctx.fillText('VAL', labelX, yVal);
+        ctx.restore();
+    }
+    /**
+     * Draws the delta (buy - sell) and total volume labels below the footprint.
+     */
+    function drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, zoomX) {
+        const yLowFootprint = scales.rowToY(maxRow) + 2;
+        const delta = totBuy - totSell;
+        const deltaFontSize = Math.max(8, Math.min(18, 12 * zoomX));
+        ctx.textAlign = 'center';
+        ctx.font = `${deltaFontSize}px system-ui`;
+        ctx.fillStyle = delta >= 0 ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
+        ctx.fillText(`Delta ${scales.formatK(delta)}`, cx, yLowFootprint + 14);
+        ctx.fillStyle = theme.totalColor || '#fff';
+        ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
+    }
+    /**
+     * Draws the traditional candlestick wick (high/low line) and body (open/close rectangle).
+     */
+    function drawCandleWickAndBody(ctx, cx, half, candle, scales, theme) {
+        const yHigh = scales.priceToY(candle.high);
+        const yLow = scales.priceToY(candle.low);
+        const yOpen = scales.priceToY(candle.open);
+        const yClose = scales.priceToY(candle.close);
+        const bull = candle.close >= candle.open;
+        const color = bull ? (theme.candleBull || '#26a69a') : (theme.candleBear || '#ef5350');
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(cx, yHigh);
+        ctx.lineTo(cx, yLow);
+        ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.fillRect(cx - half, Math.min(yOpen, yClose), scales.scaledCandle(), Math.abs(yClose - yOpen));
+    }
+    /**
+     * Main footprint drawing function that orchestrates all footprint-related rendering.
+     */
+    function drawFootprint(ctx, candle, i, startIndex, scales, theme, view, showVolumeFootprint) {
+        const cx = scales.indexToX(i, startIndex);
+        const half = scales.scaledCandle() / 2;
+        if (showVolumeFootprint) {
+            const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
+            const enableProfile = rows.length > 3;
+            const { pocIdx, vahIdx, valIdx, VAH, VAL, totalVol } = computeVolumeArea(rows);
+            const leftX = cx - half - scales.scaledBox();
+            const rightX = cx + half;
+            // Draw footprint boxes and calculate totals
+            const { minRow, maxRow, totBuy, totSell } = drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme);
+            // Draw imbalance markers
+            drawImbalanceMarkers(ctx, rows, leftX, rightX, scales, theme);
+            // Draw volume numbers
+            if (scales.shouldShowCellText()) {
+                drawVolumeNumbers(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme, view.zoomX);
+            }
+            // Draw VAH/VAL boundaries and labels
+            if (enableProfile && scales.shouldShowCellText()) {
+                drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, view.zoomX);
+            }
+            // Draw delta and total volume labels
+            if (scales.shouldShowCellText()) {
+                drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, view.zoomX);
+            }
+        }
+        // Draw candle wick and body
+        drawCandleWickAndBody(ctx, cx, half, candle, scales, theme);
+    }
+
+    /**
+     * Scale and axis drawing functions for the Volume Footprint Chart.
+     * Handles rendering of price bars, timeline, and related scale elements.
+     */
+    /**
+     * Draws the price bar on the right side and price labels.
+     */
+    function drawPriceBar(ctx, width, height, margin, scales, theme) {
+        const right = width - margin.right;
+        ctx.fillStyle = theme.scaleBackground || '#111';
+        ctx.fillRect(right, 0, margin.right, height);
+        ctx.strokeStyle = theme.scaleBorder || '#444';
+        ctx.strokeRect(right + 0.5, margin.top, 0.5, height - margin.top - margin.bottom);
+        // Price labels
+        ctx.fillStyle = theme.textColor || '#aaa';
+        ctx.font = '12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const labels = scales.computePriceBarLabels();
+        for (const { price, y } of labels) {
+            ctx.fillText(scales.formatK(price), right + margin.right / 2, y);
+        }
+    }
+    /**
+     * Draws the timeline at the bottom with time labels.
+     */
+    function drawTimeline(ctx, width, height, margin, scales, data, theme) {
+        const bottomY = margin.top + (height - margin.top - margin.bottom);
+        const chartW = width - margin.left - margin.right;
+        ctx.fillStyle = theme.scaleBackground || '#111';
+        ctx.fillRect(margin.left, bottomY, chartW, margin.bottom);
+        ctx.strokeStyle = theme.scaleBorder || '#444';
+        ctx.beginPath();
+        ctx.moveTo(margin.left, bottomY + 0.5);
+        ctx.lineTo(margin.left + chartW, bottomY + 0.5);
+        ctx.stroke();
+        // Timeline labels - extended to show future times
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(margin.left, bottomY, chartW, margin.bottom);
+        ctx.clip();
+        ctx.fillStyle = theme.textColor || '#aaa';
+        ctx.font = '12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const step = Math.max(1, Math.floor(120 / scales.scaledSpacing()));
+        const vr = scales.getVisibleRange();
+        // Extend timeline to show future times beyond current data
+        const extendedStart = Math.max(0, vr.startIndex - 10);
+        const extendedEnd = vr.endIndex + 30; // Show 30 future time slots
+        for (let i = extendedStart; i < extendedEnd; i += step) {
+            const x = scales.indexToX(i, vr.startIndex);
+            let date;
+            if (i < data.length && data[i]) {
+                date = new Date(data[i].time);
+            }
+            else {
+                // Extrapolate future times based on data intervals
+                if (data.length > 1) {
+                    const lastTime = new Date(data[data.length - 1].time).getTime();
+                    const prevTime = new Date(data[data.length - 2].time).getTime();
+                    const interval = lastTime - prevTime; // Time between last two data points
+                    date = new Date(lastTime + (i - data.length + 1) * interval);
+                }
+                else {
+                    // Fallback: assume 1 minute intervals
+                    const lastTime = data.length > 0 ?
+                        new Date(data[data.length - 1].time).getTime() :
+                        Date.now();
+                    date = new Date(lastTime + (i - Math.max(0, data.length - 1)) * 60000);
+                }
+            }
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const t = `${hours}:${minutes}`;
+            ctx.fillText(t, x, bottomY + margin.bottom / 2);
+        }
+        ctx.restore();
+    }
+    /**
+     * Draws the complete scales (price bar and timeline).
+     */
+    function drawScales(ctx, width, height, margin, scales, data, theme) {
+        drawPriceBar(ctx, width, height, margin, scales, theme);
+        drawTimeline(ctx, width, height, margin, scales, data, theme);
+    }
+
+    /**
+     * Grid and bounds drawing functions for the Volume Footprint Chart.
+     * Handles background grid lines and chart boundary visualization.
+     */
+    /**
+     * Draws the background grid lines.
+     */
+    function drawGrid(ctx, width, margin, scales, theme) {
+        const chartRight = width - margin.right;
+        ctx.strokeStyle = theme.gridColor || '#333';
+        ctx.lineWidth = 1;
+        const gridSpacing = 28;
+        const numLines = Math.floor(scales.chartHeight() / gridSpacing);
+        ctx.beginPath();
+        for (let i = 0; i <= numLines; i++) {
+            const y = margin.top + i * gridSpacing;
+            ctx.moveTo(margin.left, y);
+            ctx.lineTo(chartRight, y);
+        }
+        ctx.stroke();
+        const vr = scales.getVisibleRange();
+        ctx.beginPath();
+        for (let i = vr.startIndex; i < vr.endIndex; i++) {
+            const x = scales.indexToX(i, vr.startIndex) + scales.scaledSpacing() / 2;
+            ctx.moveTo(x, margin.top);
+            ctx.lineTo(x, margin.top + scales.chartHeight());
+        }
+        ctx.strokeStyle = theme.gridLightColor || '#252525';
+        ctx.stroke();
+    }
+    /**
+     * Draws chart boundary outlines and gutters.
+     */
+    function drawBounds(ctx, width, height, margin, scales) {
+        const chartW = width - margin.left - margin.right;
+        const chartH = scales.chartHeight();
+        const rightX = width - margin.right;
+        const bottomY = margin.top + chartH;
+        ctx.save();
+        // shade outside chart area slightly so user sees gutters
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.05)';
+        // top gutter
+        ctx.fillRect(0, 0, width, margin.top);
+        // left gutter
+        ctx.fillRect(0, margin.top, margin.left, chartH);
+        // right price bar area (already visible)
+        // bottom timeline area (already visible)
+        // outline chart rect
+        ctx.setLineDash([6, 3]);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(margin.left + 0.5, margin.top + 0.5, chartW, chartH);
+        // outline price bar and timeline for clarity
+        ctx.strokeStyle = '#22d3ee'; // cyan for scales
+        // price bar
+        ctx.strokeRect(rightX + 0.5, 0.5, margin.right - 1, height - 1);
+        // timeline
+        ctx.strokeRect(margin.left + 0.5, bottomY + 0.5, chartW, margin.bottom - 1);
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    /**
+     * Crosshair and price label drawing functions for the Volume Footprint Chart.
+     * Handles cursor tracking and current price display.
+     */
+    /**
+     * Draws the crosshair lines and labels at the current mouse position.
+     */
+    function drawCrosshair(ctx, width, height, margin, crosshair, scales, data, theme) {
+        if (!crosshair.visible)
+            return;
+        const chartRight = width - margin.right;
+        const yBottom = margin.top + (height - margin.top - margin.bottom);
+        ctx.save();
+        // Draw vertical line
+        ctx.strokeStyle = theme.textColor || '#aaa';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(crosshair.x, margin.top);
+        ctx.lineTo(crosshair.x, yBottom);
+        ctx.stroke();
+        // Draw horizontal line
+        ctx.beginPath();
+        ctx.moveTo(margin.left, crosshair.y);
+        ctx.lineTo(chartRight, crosshair.y);
+        ctx.stroke();
+        // Draw price label on right side
+        const price = scales.rowIndexToPrice((crosshair.y - margin.top) / scales.rowHeightPx());
+        ctx.setLineDash([]);
+        ctx.fillStyle = theme.scaleBackground || '#111';
+        ctx.fillRect(chartRight, crosshair.y - 8, margin.right, 16);
+        ctx.strokeStyle = theme.scaleBorder || '#444';
+        ctx.strokeRect(chartRight, crosshair.y - 8, margin.right, 16);
+        ctx.fillStyle = theme.textColor || '#aaa';
+        ctx.font = 'bold 12px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(scales.formatK(price), chartRight + margin.right / 2, crosshair.y);
+        // Draw time label on bottom
+        const index = scales.screenXToDataIndex(crosshair.x);
+        let timeStr = '--:--';
+        if (index >= 0 && index < data.length && data[index]) {
+            const date = new Date(data[index].time);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            timeStr = `${hours}:${minutes}`;
+        }
+        ctx.fillStyle = theme.scaleBackground || '#111';
+        ctx.fillRect(crosshair.x - 20, yBottom, 40, margin.bottom);
+        ctx.strokeStyle = theme.scaleBorder || '#444';
+        ctx.strokeRect(crosshair.x - 20, yBottom, 40, margin.bottom);
+        ctx.fillStyle = theme.textColor || '#aaa';
+        ctx.font = '11px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(timeStr, crosshair.x, yBottom + margin.bottom / 2);
+        ctx.restore();
+    }
+    /**
+     * Draws the current price label with a dashed line across the chart.
+     */
+    function drawCurrentPriceLabel(ctx, width, lastPrice, margin, scales, theme) {
+        if (!lastPrice)
+            return;
+        const right = width - margin.right;
+        const y = scales.priceToY(lastPrice);
+        ctx.save();
+        // Draw dashed line across the chart at the last price level
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = theme.textColor || '#aaa';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Draw price label on the price bar (right side scale area)
+        const labelText = scales.formatK(lastPrice);
+        ctx.font = 'bold 12px system-ui';
+        const textWidth = ctx.measureText(labelText).width;
+        const boxWidth = textWidth + 8;
+        const boxHeight = 18;
+        // Position the label in the price bar area
+        const boxX = right + 2;
+        const boxY = y - boxHeight / 2;
+        // Draw background
+        ctx.fillStyle = '#26a69a'; // Green background like in the image
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw border
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw price text
+        ctx.fillStyle = '#ffffff'; // White text
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(labelText, boxX + boxWidth / 2, boxY + boxHeight / 2);
+        ctx.restore();
+    }
+
+    /**
+     * Measurement tool drawing functions for the Volume Footprint Chart.
+     * Handles drawing of measurement rectangles and associated data labels.
+     */
+    /**
+     * Draws the measurement rectangle and associated data labels.
+     */
+    function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
+        if (!measureRectangle)
+            return;
+        ctx.save();
+        // Use screen coordinates directly
+        const startX = measureRectangle.startX;
+        const startY = measureRectangle.startY;
+        const endX = measureRectangle.endX;
+        const endY = measureRectangle.endY;
+        // Calculate rectangle bounds
+        const rectX = Math.min(startX, endX);
+        const rectY = Math.min(startY, endY);
+        const rectWidth = Math.abs(endX - startX);
+        const rectHeight = Math.abs(endY - startY);
+        // Calculate price and time differences using current screen positions
+        const startPrice = scales.screenYToPrice(startY);
+        const endPrice = scales.screenYToPrice(endY);
+        const startIndex = scales.screenXToDataIndex(startX);
+        const endIndex = scales.screenXToDataIndex(endX);
+        const priceDiff = endPrice - startPrice;
+        const timeDiff = endIndex - startIndex;
+        const isPositive = priceDiff >= 0;
+        // Draw light green/red rectangle
+        const rectColor = isPositive ? 'rgba(22, 163, 74, 0.2)' : 'rgba(220, 38, 38, 0.2)'; // Light green/red
+        ctx.fillStyle = rectColor;
+        ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+        // Draw rectangle border
+        const borderColor = isPositive ? 'rgba(22, 163, 74, 0.8)' : 'rgba(220, 38, 38, 0.8)';
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+        // Draw measure data box below the rectangle with all details
+        const centerX = rectX + rectWidth / 2;
+        // Calculate percentage change
+        const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
+        // Prepare all text lines
+        const priceSign = priceDiff >= 0 ? '+' : '';
+        const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
+        const startPriceText = `Start: ${startPrice.toFixed(2)}`;
+        const endPriceText = `End: ${endPrice.toFixed(2)}`;
+        const timeSign = timeDiff >= 0 ? '+' : '';
+        const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
+        const lines = [priceText, startPriceText, endPriceText, timeText];
+        // Bigger font
+        ctx.font = '14px system-ui';
+        const lineHeight = 18;
+        const padding = 8;
+        const maxWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+        const boxWidth = maxWidth + padding * 2;
+        const boxHeight = lines.length * lineHeight + padding * 2;
+        const boxX = centerX - boxWidth / 2;
+        const boxY = rectY + rectHeight + 8;
+        // Box colors
+        const boxColor = isPositive ? '#16a34a' : '#dc2626'; // Green for positive, red for negative
+        const textColor = '#ffffff';
+        // Draw box background
+        ctx.fillStyle = boxColor;
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw box border
+        ctx.strokeStyle = textColor;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+        // Draw text lines
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        lines.forEach((line, index) => {
+            const y = boxY + padding + index * lineHeight;
+            ctx.fillText(line, centerX, y);
+        });
+        ctx.restore();
+    }
+
+    /**
+     * Handles all rendering operations for the Volume Footprint Chart.
+     * Responsible for drawing grid, chart elements, scales, crosshair, and measurements.
+     */
     class Drawing {
         constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, scales, theme, crosshair, lastPrice, interactions) {
             this.ctx = ctx;
@@ -359,41 +986,15 @@
             const height = this.ctx.canvas.height / window.devicePixelRatio;
             this.ctx.clearRect(0, 0, width, height);
             if (this.showGrid)
-                this.drawGrid();
+                drawGrid(this.ctx, width, this.margin, this.scales, this.theme);
             this.drawChart();
-            this.drawMeasureRectangle();
-            this.drawScales();
-            this.drawCurrentPriceLabel();
+            drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
+            drawScales(this.ctx, width, height, this.margin, this.scales, this.data, this.theme);
+            drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
             if (this.crosshair.visible)
-                this.drawCrosshair();
+                drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
             if (this.showBounds)
-                this.drawBounds();
-        }
-        drawGrid() {
-            if (!this.showGrid)
-                return;
-            const width = this.ctx.canvas.width / window.devicePixelRatio;
-            const chartRight = width - this.margin.right;
-            this.ctx.strokeStyle = this.theme.gridColor || '#333';
-            this.ctx.lineWidth = 1;
-            const gridSpacing = 28;
-            const numLines = Math.floor(this.scales.chartHeight() / gridSpacing);
-            this.ctx.beginPath();
-            for (let i = 0; i <= numLines; i++) {
-                const y = this.margin.top + i * gridSpacing;
-                this.ctx.moveTo(this.margin.left, y);
-                this.ctx.lineTo(chartRight, y);
-            }
-            this.ctx.stroke();
-            const vr = this.scales.getVisibleRange();
-            this.ctx.beginPath();
-            for (let i = vr.startIndex; i < vr.endIndex; i++) {
-                const x = this.scales.indexToX(i, vr.startIndex) + this.scales.scaledSpacing() / 2;
-                this.ctx.moveTo(x, this.margin.top);
-                this.ctx.lineTo(x, this.margin.top + this.scales.chartHeight());
-            }
-            this.ctx.strokeStyle = this.theme.gridLightColor || '#252525';
-            this.ctx.stroke();
+                drawBounds(this.ctx, width, height, this.margin, this.scales);
         }
         drawChart() {
             this.ctx.save();
@@ -403,438 +1004,16 @@
             this.ctx.clip();
             const vr = this.scales.getVisibleRange();
             for (let i = vr.startIndex; i < vr.endIndex; i++) {
-                this.drawFootprint(this.data[i], i, vr.startIndex);
+                drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint);
             }
-            this.ctx.restore();
-        }
-        drawMeasureRectangle() {
-            const measureRectangle = this.interactions.getMeasureRectangle();
-            if (!measureRectangle)
-                return;
-            this.ctx.save();
-            // Use screen coordinates directly
-            const startX = measureRectangle.startX;
-            const startY = measureRectangle.startY;
-            const endX = measureRectangle.endX;
-            const endY = measureRectangle.endY;
-            // Calculate rectangle bounds
-            const rectX = Math.min(startX, endX);
-            const rectY = Math.min(startY, endY);
-            const rectWidth = Math.abs(endX - startX);
-            const rectHeight = Math.abs(endY - startY);
-            // Calculate price and time differences using current screen positions
-            const startPrice = this.scales.screenYToPrice(startY);
-            const endPrice = this.scales.screenYToPrice(endY);
-            const startIndex = this.scales.screenXToDataIndex(startX);
-            const endIndex = this.scales.screenXToDataIndex(endX);
-            const priceDiff = endPrice - startPrice;
-            const timeDiff = endIndex - startIndex;
-            const isPositive = priceDiff >= 0;
-            // Draw light green/red rectangle
-            const rectColor = isPositive ? 'rgba(22, 163, 74, 0.2)' : 'rgba(220, 38, 38, 0.2)'; // Light green/red
-            this.ctx.fillStyle = rectColor;
-            this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
-            // Draw rectangle border
-            const borderColor = isPositive ? 'rgba(22, 163, 74, 0.8)' : 'rgba(220, 38, 38, 0.8)';
-            this.ctx.strokeStyle = borderColor;
-            this.ctx.lineWidth = 1;
-            this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
-            // Draw measure data box below the rectangle with all details
-            const centerX = rectX + rectWidth / 2;
-            // Calculate percentage change
-            const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
-            // Prepare all text lines
-            const priceSign = priceDiff >= 0 ? '+' : '';
-            const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
-            const startPriceText = `Start: ${startPrice.toFixed(2)}`;
-            const endPriceText = `End: ${endPrice.toFixed(2)}`;
-            const timeSign = timeDiff >= 0 ? '+' : '';
-            const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
-            const lines = [priceText, startPriceText, endPriceText, timeText];
-            // Bigger font
-            this.ctx.font = '14px system-ui';
-            const lineHeight = 18;
-            const padding = 8;
-            const maxWidth = Math.max(...lines.map(line => this.ctx.measureText(line).width));
-            const boxWidth = maxWidth + padding * 2;
-            const boxHeight = lines.length * lineHeight + padding * 2;
-            const boxX = centerX - boxWidth / 2;
-            const boxY = rectY + rectHeight + 8;
-            // Box colors
-            const boxColor = isPositive ? '#16a34a' : '#dc2626'; // Green for positive, red for negative
-            const textColor = '#ffffff';
-            // Draw box background
-            this.ctx.fillStyle = boxColor;
-            this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-            // Draw box border
-            this.ctx.strokeStyle = textColor;
-            this.ctx.lineWidth = 1;
-            this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-            // Draw text lines
-            this.ctx.fillStyle = textColor;
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'top';
-            lines.forEach((line, index) => {
-                const y = boxY + padding + index * lineHeight;
-                this.ctx.fillText(line, centerX, y);
-            });
-            this.ctx.restore();
-        }
-        drawScales() {
-            const width = this.ctx.canvas.width / window.devicePixelRatio;
-            const height = this.ctx.canvas.height / window.devicePixelRatio;
-            // Right price bar
-            const right = width - this.margin.right;
-            this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-            this.ctx.fillRect(right, 0, this.margin.right, height);
-            this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-            this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, this.scales.chartHeight());
-            // Price labels
-            this.ctx.fillStyle = this.theme.textColor || '#aaa';
-            this.ctx.font = '12px system-ui';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            const labels = this.scales.computePriceBarLabels();
-            for (const { price, y } of labels) {
-                this.ctx.fillText(String(price), right + this.margin.right / 2, y);
-            }
-            // Bottom timeline
-            const bottomY = this.margin.top + this.scales.chartHeight();
-            const chartW = width - this.margin.left - this.margin.right;
-            this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-            this.ctx.fillRect(this.margin.left, bottomY, chartW, this.margin.bottom);
-            this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.margin.left, bottomY + 0.5);
-            this.ctx.lineTo(this.margin.left + chartW, bottomY + 0.5);
-            this.ctx.stroke();
-            // Timeline labels - extended to show future times
-            this.ctx.save();
-            this.ctx.beginPath();
-            this.ctx.rect(this.margin.left, bottomY, chartW, this.margin.bottom);
-            this.ctx.clip();
-            this.ctx.fillStyle = this.theme.textColor || '#aaa';
-            this.ctx.font = '12px system-ui';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            const step = Math.max(1, Math.floor(120 / this.scales.scaledSpacing()));
-            const vr = this.scales.getVisibleRange();
-            // Extend timeline to show future times beyond current data
-            const extendedStart = Math.max(0, vr.startIndex - 10);
-            const extendedEnd = vr.endIndex + 30; // Show 30 future time slots
-            for (let i = extendedStart; i < extendedEnd; i += step) {
-                const x = this.scales.indexToX(i, vr.startIndex);
-                let date;
-                if (i < this.data.length && this.data[i]) {
-                    date = new Date(this.data[i].time);
-                }
-                else {
-                    // Extrapolate future times based on data intervals
-                    if (this.data.length > 1) {
-                        const lastTime = new Date(this.data[this.data.length - 1].time).getTime();
-                        const prevTime = new Date(this.data[this.data.length - 2].time).getTime();
-                        const interval = lastTime - prevTime; // Time between last two data points
-                        date = new Date(lastTime + (i - this.data.length + 1) * interval);
-                    }
-                    else {
-                        // Fallback: assume 1 minute intervals
-                        const lastTime = this.data.length > 0 ?
-                            new Date(this.data[this.data.length - 1].time).getTime() :
-                            Date.now();
-                        date = new Date(lastTime + (i - Math.max(0, this.data.length - 1)) * 60000);
-                    }
-                }
-                const hours = date.getHours().toString().padStart(2, '0');
-                const minutes = date.getMinutes().toString().padStart(2, '0');
-                const t = `${hours}:${minutes}`;
-                this.ctx.fillText(t, x, bottomY + this.margin.bottom / 2);
-            }
-            this.ctx.restore();
-        }
-        drawBounds() {
-            const width = this.ctx.canvas.width / window.devicePixelRatio;
-            const height = this.ctx.canvas.height / window.devicePixelRatio;
-            const chartW = width - this.margin.left - this.margin.right;
-            const chartH = this.scales.chartHeight();
-            const rightX = width - this.margin.right;
-            const bottomY = this.margin.top + chartH;
-            this.ctx.save();
-            this.ctx.fillStyle = 'rgba(255, 255, 0, 0.05)';
-            this.ctx.fillRect(0, 0, width, this.margin.top);
-            this.ctx.fillRect(0, this.margin.top, this.margin.left, chartH);
-            this.ctx.fillRect(this.margin.left, bottomY, chartW, this.margin.bottom);
-            this.ctx.setLineDash([6, 3]);
-            this.ctx.strokeStyle = '#f59e0b';
-            this.ctx.lineWidth = 1.5;
-            this.ctx.strokeRect(this.margin.left + 0.5, this.margin.top + 0.5, chartW, chartH);
-            this.ctx.strokeStyle = '#22d3ee';
-            this.ctx.strokeRect(rightX + 0.5, 0.5, this.margin.right - 1, height - 1);
-            this.ctx.strokeRect(this.margin.left + 0.5, bottomY + 0.5, chartW, this.margin.bottom - 1);
-            this.ctx.setLineDash([]);
-            this.ctx.restore();
-        }
-        drawFootprint(candle, i, startIndex) {
-            var _a, _b, _c, _d;
-            const cx = this.scales.indexToX(i, startIndex);
-            const half = this.scales.scaledCandle() / 2;
-            if (this.showVolumeFootprint) {
-                const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
-                const enableProfile = rows.length > 3;
-                // Calculate VAH/VAL
-                const levelVols = rows.map(r => r.buy + r.sell);
-                const totalVol = levelVols.reduce((a, b) => a + b, 0);
-                let pocIdx = 0;
-                for (let i = 1; i < levelVols.length; i++) {
-                    if (levelVols[i] > levelVols[pocIdx])
-                        pocIdx = i;
-                }
-                let included = new Set([pocIdx]);
-                if (enableProfile) {
-                    let acc = levelVols[pocIdx];
-                    let up = pocIdx - 1, down = pocIdx + 1;
-                    while (acc < 0.7 * totalVol && (up >= 0 || down < rows.length)) {
-                        const upVol = up >= 0 ? levelVols[up] : -1;
-                        const downVol = down < rows.length ? levelVols[down] : -1;
-                        if (upVol >= downVol) {
-                            if (up >= 0) {
-                                included.add(up);
-                                acc += levelVols[up];
-                                up--;
-                            }
-                            else {
-                                included.add(down);
-                                acc += levelVols[down];
-                                down++;
-                            }
-                        }
-                        else {
-                            if (down < rows.length) {
-                                included.add(down);
-                                acc += levelVols[down];
-                                down++;
-                            }
-                            else {
-                                included.add(up);
-                                acc += levelVols[up];
-                                up--;
-                            }
-                        }
-                    }
-                }
-                const vahIdx = Math.min(...included);
-                const valIdx = Math.max(...included);
-                const VAH = (_a = rows[vahIdx]) === null || _a === void 0 ? void 0 : _a.price;
-                const VAL = (_b = rows[valIdx]) === null || _b === void 0 ? void 0 : _b.price;
-                const leftX = cx - half - this.scales.scaledBox();
-                const rightX = cx + half;
-                const sideMax = Math.max(...rows.map(f => Math.max(f.buy, f.sell)), 1);
-                const buyBase = (_c = this.theme.volumeBuyBase) !== null && _c !== void 0 ? _c : 0.15;
-                const sellBase = (_d = this.theme.volumeSellBase) !== null && _d !== void 0 ? _d : 0.15;
-                const buyRGBA = (v) => `rgba(0,255,0,${buyBase + 0.55 * (v / sideMax)})`;
-                const sellRGBA = (v) => `rgba(255,0,0,${sellBase + 0.55 * (v / sideMax)})`;
-                let maxRow = -Infinity;
-                let totBuy = 0, totSell = 0;
-                // Draw boxes
-                for (let r = 0; r < rows.length; r++) {
-                    const f = rows[r];
-                    const row = this.scales.priceToRowIndex(f.price);
-                    const yTop = this.scales.rowToY(row - 0.5);
-                    const yBot = this.scales.rowToY(row + 0.5);
-                    const h = Math.max(1, yBot - yTop);
-                    maxRow = Math.max(maxRow, row + 0.5);
-                    totBuy += f.buy;
-                    totSell += f.sell;
-                    const isPOC = enableProfile && (r === pocIdx);
-                    this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : sellRGBA(f.sell);
-                    this.ctx.fillRect(leftX, yTop, this.scales.scaledBox(), h);
-                    this.ctx.fillStyle = isPOC ? (this.theme.pocColor || '#808080') : buyRGBA(f.buy);
-                    this.ctx.fillRect(rightX, yTop, this.scales.scaledBox(), h);
-                }
-                // Imbalance markers
-                for (let r = 0; r < rows.length; r++) {
-                    const f = rows[r];
-                    const prev = rows[r - 1];
-                    const next = rows[r + 1];
-                    const row = this.scales.priceToRowIndex(f.price);
-                    const yTop = this.scales.rowToY(row - 0.5);
-                    const yBot = this.scales.rowToY(row + 0.5);
-                    const h = Math.max(1, yBot - yTop);
-                    if (prev && f.sell >= 3 * Math.max(1, prev.buy)) {
-                        this.ctx.fillStyle = this.theme.imbalanceSell || '#dc2626';
-                        this.ctx.fillRect(leftX - this.scales.scaledImb() - 1, yTop, this.scales.scaledImb(), h);
-                    }
-                    if (next && f.buy >= 3 * Math.max(1, next.sell)) {
-                        this.ctx.fillStyle = this.theme.imbalanceBuy || '#16a34a';
-                        this.ctx.fillRect(rightX + this.scales.scaledBox() + 1, yTop, this.scales.scaledImb(), h);
-                    }
-                }
-                // Volume numbers
-                if (this.scales.shouldShowCellText()) {
-                    const fontSize = Math.max(8, Math.min(16, 11 * this.view.zoomX));
-                    this.ctx.font = `${fontSize}px system-ui`;
-                    this.ctx.textAlign = 'center';
-                    this.ctx.textBaseline = 'middle';
-                    for (let r = 0; r < rows.length; r++) {
-                        const f = rows[r];
-                        const row = this.scales.priceToRowIndex(f.price);
-                        const y = this.scales.rowToY(row);
-                        const isPOC = enableProfile && (r === pocIdx);
-                        this.ctx.fillStyle = isPOC ? (this.theme.pocTextColor || this.theme.textColorBright || '#ffffff') : (this.theme.textColorBright || '#ddd');
-                        this.ctx.fillText(this.scales.formatK(f.sell), leftX + this.scales.scaledBox() / 2, y);
-                        this.ctx.fillText(this.scales.formatK(f.buy), rightX + this.scales.scaledBox() / 2, y);
-                    }
-                }
-                // VAH/VAL lines and labels
-                if (enableProfile && this.scales.shouldShowCellText()) {
-                    const rVah = this.scales.priceToRowIndex(VAH), rVal = this.scales.priceToRowIndex(VAL);
-                    const yVah = this.scales.rowToY(rVah - 0.5);
-                    const yVal = this.scales.rowToY(rVal + 0.5);
-                    const rightEdge = rightX + this.scales.scaledBox();
-                    this.ctx.save();
-                    this.ctx.setLineDash([4, 2]);
-                    this.ctx.strokeStyle = this.theme.vahValColor || '#9ca3af';
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(leftX, yVah);
-                    this.ctx.lineTo(rightEdge, yVah);
-                    this.ctx.stroke();
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(leftX, yVal);
-                    this.ctx.lineTo(rightEdge, yVal);
-                    this.ctx.stroke();
-                    this.ctx.setLineDash([]);
-                    const vahFontSize = Math.max(6, Math.min(12, 8 * this.view.zoomX));
-                    this.ctx.fillStyle = this.theme.vahValLabelColor || '#cfd3d6';
-                    this.ctx.font = `${vahFontSize}px monospace`;
-                    this.ctx.textAlign = 'left';
-                    this.ctx.textBaseline = 'middle';
-                    const labelX = cx - half - this.scales.scaledBox() + 3;
-                    this.ctx.fillText('VAH', labelX, yVah);
-                    this.ctx.fillText('VAL', labelX, yVal);
-                    this.ctx.restore();
-                }
-                // Delta/Total labels
-                if (this.scales.shouldShowCellText()) {
-                    const yLowFootprint = this.scales.rowToY(maxRow) + 2;
-                    const delta = totBuy - totSell;
-                    const deltaFontSize = Math.max(8, Math.min(18, 12 * this.view.zoomX));
-                    this.ctx.textAlign = 'center';
-                    this.ctx.font = `${deltaFontSize}px system-ui`;
-                    this.ctx.fillStyle = delta >= 0 ? (this.theme.deltaPositive || '#16a34a') : (this.theme.deltaNegative || '#dc2626');
-                    this.ctx.fillText(`Delta ${this.scales.formatK(delta)}`, cx, yLowFootprint + 14);
-                    this.ctx.fillStyle = this.theme.totalColor || '#fff';
-                    this.ctx.fillText(`Total ${this.scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
-                }
-            }
-            // Wick & body (always drawn)
-            const yHigh = this.scales.priceToY(candle.high);
-            const yLow = this.scales.priceToY(candle.low);
-            const yOpen = this.scales.priceToY(candle.open);
-            const yClose = this.scales.priceToY(candle.close);
-            const bull = candle.close >= candle.open;
-            const color = bull ? (this.theme.candleBull || '#26a69a') : (this.theme.candleBear || '#ef5350');
-            this.ctx.strokeStyle = color;
-            this.ctx.beginPath();
-            this.ctx.moveTo(cx, yHigh);
-            this.ctx.lineTo(cx, yLow);
-            this.ctx.stroke();
-            this.ctx.fillStyle = color;
-            this.ctx.fillRect(cx - half, Math.min(yOpen, yClose), this.scales.scaledCandle(), Math.abs(yClose - yOpen));
-        }
-        drawCrosshair() {
-            if (!this.crosshair.visible)
-                return;
-            const width = this.ctx.canvas.width / window.devicePixelRatio;
-            this.ctx.canvas.height / window.devicePixelRatio;
-            const chartRight = width - this.margin.right;
-            const yBottom = this.margin.top + this.scales.chartHeight();
-            this.ctx.save();
-            // Draw vertical line
-            this.ctx.strokeStyle = this.theme.textColor || '#aaa';
-            this.ctx.lineWidth = 1;
-            this.ctx.setLineDash([2, 2]);
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.crosshair.x, this.margin.top);
-            this.ctx.lineTo(this.crosshair.x, yBottom);
-            this.ctx.stroke();
-            // Draw horizontal line
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.margin.left, this.crosshair.y);
-            this.ctx.lineTo(chartRight, this.crosshair.y);
-            this.ctx.stroke();
-            // Draw price label on right side
-            const price = this.scales.rowIndexToPrice((this.crosshair.y - this.margin.top) / this.scales.rowHeightPx() + this.view.offsetRows);
-            this.ctx.setLineDash([]);
-            this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-            this.ctx.fillRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
-            this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-            this.ctx.strokeRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
-            this.ctx.fillStyle = this.theme.textColor || '#aaa';
-            this.ctx.font = 'bold 12px system-ui';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            this.ctx.fillText(price.toFixed(2), chartRight + this.margin.right / 2, this.crosshair.y);
-            // Draw time label on bottom
-            const index = this.scales.screenXToDataIndex(this.crosshair.x);
-            let timeStr = '--:--';
-            if (index >= 0 && index < this.data.length && this.data[index]) {
-                const date = new Date(this.data[index].time);
-                const hours = date.getHours().toString().padStart(2, '0');
-                const minutes = date.getMinutes().toString().padStart(2, '0');
-                timeStr = `${hours}:${minutes}`;
-            }
-            this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-            this.ctx.fillRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
-            this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-            this.ctx.strokeRect(this.crosshair.x - 20, yBottom, 40, this.margin.bottom);
-            this.ctx.fillStyle = this.theme.textColor || '#aaa';
-            this.ctx.font = '11px system-ui';
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            this.ctx.fillText(timeStr, this.crosshair.x, yBottom + this.margin.bottom / 2);
-            this.ctx.restore();
-        }
-        drawCurrentPriceLabel() {
-            if (!this.lastPrice)
-                return;
-            const width = this.ctx.canvas.width / window.devicePixelRatio;
-            this.ctx.canvas.height / window.devicePixelRatio;
-            const right = width - this.margin.right;
-            const y = this.scales.priceToY(this.lastPrice);
-            this.ctx.save();
-            // Draw dashed line across the chart at the last price level
-            this.ctx.setLineDash([5, 5]);
-            this.ctx.strokeStyle = this.theme.textColor || '#aaa';
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.margin.left, y);
-            this.ctx.lineTo(right, y);
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-            // Draw price label on the price bar (right side scale area)
-            const labelText = this.lastPrice.toFixed(2);
-            this.ctx.font = 'bold 12px system-ui';
-            const textWidth = this.ctx.measureText(labelText).width;
-            const boxWidth = textWidth + 8;
-            const boxHeight = 18;
-            // Position the label in the price bar area
-            const boxX = right + 2;
-            const boxY = y - boxHeight / 2;
-            // Draw background
-            this.ctx.fillStyle = '#26a69a'; // Green background like in the image
-            this.ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-            // Draw border
-            this.ctx.strokeStyle = '#ffffff';
-            this.ctx.lineWidth = 1;
-            this.ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-            // Draw price text
-            this.ctx.fillStyle = '#ffffff'; // White text
-            this.ctx.textAlign = 'center';
-            this.ctx.textBaseline = 'middle';
-            this.ctx.fillText(labelText, boxX + boxWidth / 2, boxY + boxHeight / 2);
             this.ctx.restore();
         }
     }
 
+    /**
+     * Main chart implementation for the Volume Footprint Chart.
+     * Provides the primary API for creating and managing chart instances with modular components.
+     */
     class Chart {
         createChartStructure(container) {
             // Check if toolbars already exist
@@ -890,8 +1069,70 @@
             this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
             this.measureBtn = measureBtn;
         }
-        constructor(container, options = {}, events = {}) {
+        /**
+         * Initializes the canvas element and context.
+         * @param container The container element
+         * @param chartContainer The chart container element
+         */
+        initializeCanvas(container, chartContainer) {
+            // Use existing canvas if available, otherwise create one
+            this.canvas = container.querySelector('canvas');
+            if (!this.canvas) {
+                this.canvas = document.createElement('canvas');
+                if (chartContainer) {
+                    chartContainer.appendChild(this.canvas);
+                }
+                else {
+                    // Fallback: append directly to container if chart container not found
+                    container.appendChild(this.canvas);
+                }
+            }
+            const ctx = this.canvas.getContext('2d');
+            if (!ctx)
+                throw new Error('Canvas 2D context not available');
+            this.ctx = ctx;
+        }
+        /**
+         * Initializes chart options with defaults and user-provided values.
+         * @param options User-provided options
+         * @param container The container element
+         * @param chartContainer The chart container element
+         */
+        initializeOptions(options, container, chartContainer) {
             var _a, _b, _c;
+            this.options = {
+                width: options.width || container.clientWidth || 800,
+                height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
+                showGrid: (_a = options.showGrid) !== null && _a !== void 0 ? _a : true,
+                showBounds: (_b = options.showBounds) !== null && _b !== void 0 ? _b : false,
+                showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
+                tickSize: options.tickSize || 10,
+                initialZoomX: options.initialZoomX || 0.55,
+                initialZoomY: options.initialZoomY || 0.55,
+                margin: options.margin || this.margin,
+                theme: options.theme || {}
+            };
+            this.margin = this.options.margin;
+            this.showGrid = this.options.showGrid;
+            this.showBounds = this.options.showBounds;
+            this.showVolumeFootprint = this.options.showVolumeFootprint;
+            this.view.zoomX = this.options.initialZoomX;
+            this.view.zoomY = this.options.initialZoomY;
+        }
+        /**
+         * Initializes the chart modules (Scales, Interactions, Drawing).
+         */
+        initializeModules() {
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+            this.interactions = new Interactions(this.canvas, this.margin, this.view, {
+                ...this.events,
+                onPan: () => this.drawing.drawAll(),
+                onZoom: () => this.drawing.drawAll(),
+                onMouseMove: () => this.drawing.drawAll()
+            }, this.crosshair, this.scales);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        }
+        constructor(container, options = {}, events = {}) {
             this.data = [];
             this.events = {};
             // Chart state
@@ -920,50 +1161,15 @@
             this.createChartStructure(container);
             // Get the chart container for accurate dimensions
             const chartContainer = container.querySelector('.vfc-chart-container');
-            // Use existing canvas if available, otherwise create one
-            this.canvas = container.querySelector('canvas');
-            if (!this.canvas) {
-                this.canvas = document.createElement('canvas');
-                if (chartContainer) {
-                    chartContainer.appendChild(this.canvas);
-                }
-                else {
-                    // Fallback: append directly to container if chart container not found
-                    container.appendChild(this.canvas);
-                }
-            }
-            const ctx = this.canvas.getContext('2d');
-            if (!ctx)
-                throw new Error('Canvas 2D context not available');
-            this.ctx = ctx;
-            this.options = {
-                width: options.width || container.clientWidth || 800,
-                height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
-                showGrid: (_a = options.showGrid) !== null && _a !== void 0 ? _a : true,
-                showBounds: (_b = options.showBounds) !== null && _b !== void 0 ? _b : false,
-                showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
-                tickSize: options.tickSize || 10,
-                initialZoomX: options.initialZoomX || 0.55,
-                initialZoomY: options.initialZoomY || 0.55,
-                margin: options.margin || this.margin,
-                theme: options.theme || {}
-            };
+            // Initialize canvas
+            this.initializeCanvas(container, chartContainer);
+            // Initialize options
+            this.initializeOptions(options, container, chartContainer);
+            // Set events
             this.events = events;
-            this.margin = this.options.margin;
-            this.showGrid = this.options.showGrid;
-            this.showBounds = this.options.showBounds;
-            this.showVolumeFootprint = this.options.showVolumeFootprint;
-            this.view.zoomX = this.options.initialZoomX;
-            this.view.zoomY = this.options.initialZoomY;
             // Initialize modules
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-            this.interactions = new Interactions(this.canvas, this.margin, this.view, {
-                ...this.events,
-                onPan: () => this.drawing.drawAll(),
-                onZoom: () => this.drawing.drawAll(),
-                onMouseMove: () => this.drawing.drawAll()
-            }, this.crosshair, this.scales);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+            this.initializeModules();
+            // Set up canvas and event handlers
             this.setupCanvas();
             this.bindEvents();
             this.bindToolbarEvents();
