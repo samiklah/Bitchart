@@ -105,6 +105,17 @@
             const relativeX = screenX - this.margin.left + this.xShift - s / 2;
             return vr.startIndex + Math.floor(relativeX / s);
         }
+        // Exact fractional data index for precise drawing coordinates
+        screenXToExactDataIndex(screenX) {
+            const vr = this.getVisibleRange();
+            const s = this.scaledSpacing();
+            const relativeX = screenX - this.margin.left + this.xShift - s / 2;
+            return vr.startIndex + relativeX / s;
+        }
+        screenYToPrice(screenY) {
+            // Use the exact same calculation as the crosshair
+            return this.rowIndexToPrice((screenY - this.margin.top) / this.rowHeightPx() + this.view.offsetRows);
+        }
         get ladderTop() {
             if (this.data.length === 0)
                 return 10000;
@@ -113,14 +124,18 @@
     }
 
     class Interactions {
-        constructor(canvas, margin, view, events, crosshair) {
+        constructor(canvas, margin, view, events, crosshair, scales) {
             this.momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
             this.PAN_INVERT = { x: true, y: false };
+            // Measure state
+            this.isMeasureMode = false;
+            this.measureRectangle = null;
             this.canvas = canvas;
             this.margin = margin;
             this.view = view;
             this.events = events;
             this.crosshair = crosshair;
+            this.scales = scales;
             this.setupMouseTracking();
         }
         handleWheel(e) {
@@ -138,6 +153,7 @@
                 this.view.zoomY *= (e.deltaY < 0 ? 1.1 : 0.9);
                 this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
                 (_b = (_a = this.events).onZoom) === null || _b === void 0 ? void 0 : _b.call(_a, this.view.zoomX, this.view.zoomY);
+                this.clearMeasureRectangle();
             }
             else if (overChartBody) {
                 const prev = this.view.zoomX;
@@ -149,6 +165,7 @@
                 // Adjust offsetX to keep the same startIndex (prevent scrolling)
                 this.view.offsetX *= (next / prev);
                 (_d = (_c = this.events).onZoom) === null || _d === void 0 ? void 0 : _d.call(_c, this.view.zoomX, this.view.zoomY);
+                this.clearMeasureRectangle();
             }
             else if (overTimeline) {
                 // Timeline zoom: same mechanism as chart but only affects X axis
@@ -158,9 +175,19 @@
                 this.view.zoomX = next;
                 this.view.offsetX *= (next / prev);
                 (_f = (_e = this.events).onZoom) === null || _f === void 0 ? void 0 : _f.call(_e, this.view.zoomX, this.view.zoomY);
+                this.clearMeasureRectangle();
             }
         }
         handlePointerDown(e) {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            // Check if we're in measure mode
+            if (this.isMeasureMode) {
+                this.handleMeasurePointerDown(e, x, y);
+                return;
+            }
+            // Normal pan mode
             this.canvas.setPointerCapture(e.pointerId);
             let lastX = e.clientX;
             let lastY = e.clientY;
@@ -179,6 +206,7 @@
                 this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / (22 * this.view.zoomY); // rowHeightPx()
                 (this.PAN_INVERT.x ? -dx : dx) / dt;
                 (_b = (_a = this.events).onPan) === null || _b === void 0 ? void 0 : _b.call(_a, this.view.offsetX, this.view.offsetRows);
+                this.clearMeasureRectangle();
             };
             const onUp = () => {
                 this.canvas.releasePointerCapture(e.pointerId);
@@ -190,6 +218,59 @@
             this.canvas.addEventListener('pointermove', onMove);
             this.canvas.addEventListener('pointerup', onUp);
             this.canvas.addEventListener('pointercancel', onUp);
+        }
+        handleMeasurePointerDown(e, x, y) {
+            // Check if we're over the chart area
+            const chartRight = this.canvas.clientWidth - this.margin.right;
+            const canvasHeight = this.canvas.height / window.devicePixelRatio;
+            const yBottom = canvasHeight - this.margin.bottom;
+            const overChartBody = x >= this.margin.left && x <= chartRight &&
+                y >= this.margin.top && y <= yBottom;
+            if (!overChartBody)
+                return;
+            this.canvas.setPointerCapture(e.pointerId);
+            // Start measuring from this point - store screen coordinates directly
+            this.measureRectangle = {
+                startX: x,
+                startY: y,
+                endX: x,
+                endY: y
+            };
+            const onMove = (ev) => {
+                var _a, _b;
+                const rect = this.canvas.getBoundingClientRect();
+                const currentX = ev.clientX - rect.left;
+                const currentY = ev.clientY - rect.top;
+                // Update the end point of the measure rectangle
+                if (this.measureRectangle) {
+                    this.measureRectangle.endX = currentX;
+                    this.measureRectangle.endY = currentY;
+                }
+                // Trigger redraw
+                (_b = (_a = this.events).onMouseMove) === null || _b === void 0 ? void 0 : _b.call(_a, currentX, currentY, true);
+            };
+            const onUp = () => {
+                this.canvas.releasePointerCapture(e.pointerId);
+                this.canvas.removeEventListener('pointermove', onMove);
+                this.canvas.removeEventListener('pointerup', onUp);
+                this.canvas.removeEventListener('pointercancel', onUp);
+            };
+            this.canvas.addEventListener('pointermove', onMove);
+            this.canvas.addEventListener('pointerup', onUp);
+            this.canvas.addEventListener('pointercancel', onUp);
+        }
+        // Public methods for controlling measure mode
+        setMeasureMode(enabled) {
+            this.isMeasureMode = enabled;
+            if (!enabled) {
+                this.measureRectangle = null;
+            }
+        }
+        getMeasureRectangle() {
+            return this.measureRectangle;
+        }
+        clearMeasureRectangle() {
+            this.measureRectangle = null;
         }
         cancelMomentum() {
             if (this.momentum.raf) {
@@ -255,7 +336,7 @@
     }
 
     class Drawing {
-        constructor(ctx, data, margin, view, showGrid, showBounds, scales, theme, crosshair, lastPrice) {
+        constructor(ctx, data, margin, view, showGrid, showBounds, scales, theme, crosshair, lastPrice, interactions) {
             this.ctx = ctx;
             this.data = data;
             this.margin = margin;
@@ -266,6 +347,7 @@
             this.theme = theme;
             this.crosshair = crosshair;
             this.lastPrice = lastPrice;
+            this.interactions = interactions;
         }
         drawAll() {
             const width = this.ctx.canvas.width / window.devicePixelRatio;
@@ -274,6 +356,7 @@
             if (this.showGrid)
                 this.drawGrid();
             this.drawChart();
+            this.drawMeasureRectangle();
             this.drawScales();
             this.drawCurrentPriceLabel();
             if (this.crosshair.visible)
@@ -317,6 +400,59 @@
             for (let i = vr.startIndex; i < vr.endIndex; i++) {
                 this.drawFootprint(this.data[i], i, vr.startIndex);
             }
+            this.ctx.restore();
+        }
+        drawMeasureRectangle() {
+            const measureRectangle = this.interactions.getMeasureRectangle();
+            if (!measureRectangle)
+                return;
+            this.ctx.save();
+            // Use screen coordinates directly
+            const startX = measureRectangle.startX;
+            const startY = measureRectangle.startY;
+            const endX = measureRectangle.endX;
+            const endY = measureRectangle.endY;
+            // Calculate rectangle bounds
+            const rectX = Math.min(startX, endX);
+            const rectY = Math.min(startY, endY);
+            const rectWidth = Math.abs(endX - startX);
+            const rectHeight = Math.abs(endY - startY);
+            // Draw transparent blue rectangle
+            this.ctx.fillStyle = 'rgba(0, 0, 255, 0.2)'; // Transparent blue
+            this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+            // Draw rectangle border
+            this.ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+            // Calculate price and time differences using current screen positions
+            const startPrice = this.scales.screenYToPrice(startY);
+            const endPrice = this.scales.screenYToPrice(endY);
+            const startIndex = this.scales.screenXToDataIndex(startX);
+            const endIndex = this.scales.screenXToDataIndex(endX);
+            const priceDiff = endPrice - startPrice;
+            const timeDiff = endIndex - startIndex;
+            // Draw measurement labels
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '11px system-ui';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            const centerX = rectX + rectWidth / 2;
+            const centerY = rectY + rectHeight / 2;
+            // Calculate percentage change
+            const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
+            // Draw price difference with sign
+            const priceSign = priceDiff >= 0 ? '+' : '';
+            const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
+            this.ctx.fillText(priceText, centerX, centerY - 20);
+            // Draw start and end prices
+            const startPriceText = `Start: ${startPrice.toFixed(2)}`;
+            const endPriceText = `End: ${endPrice.toFixed(2)}`;
+            this.ctx.fillText(startPriceText, centerX, centerY - 5);
+            this.ctx.fillText(endPriceText, centerX, centerY + 5);
+            // Draw time difference
+            const timeSign = timeDiff >= 0 ? '+' : '';
+            const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
+            this.ctx.fillText(timeText, centerX, centerY + 20);
             this.ctx.restore();
         }
         drawScales() {
@@ -606,7 +742,7 @@
             this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
             this.ctx.strokeRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
             this.ctx.fillStyle = this.theme.textColor || '#aaa';
-            this.ctx.font = '11px system-ui';
+            this.ctx.font = 'bold 12px system-ui';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText(price.toFixed(2), chartRight + this.margin.right / 2, this.crosshair.y);
@@ -673,17 +809,84 @@
     }
 
     class Chart {
+        createChartStructure(container) {
+            // Check if toolbars already exist
+            if (container.querySelector('.vfc-toolbar')) {
+                return; // Toolbars already exist, don't recreate
+            }
+            // Create the complete chart structure
+            container.classList.add('vfc-container');
+            // Create top toolbar
+            const topToolbar = document.createElement('div');
+            topToolbar.className = 'vfc-toolbar';
+            const loadDataBtn = document.createElement('button');
+            loadDataBtn.id = 'loadData';
+            loadDataBtn.className = 'tool-btn';
+            loadDataBtn.textContent = 'Load Data';
+            topToolbar.appendChild(loadDataBtn);
+            const resetZoomBtn = document.createElement('button');
+            resetZoomBtn.id = 'resetZoom';
+            resetZoomBtn.className = 'tool-btn';
+            resetZoomBtn.textContent = 'Reset';
+            topToolbar.appendChild(resetZoomBtn);
+            const toggleGridBtn = document.createElement('button');
+            toggleGridBtn.id = 'toggleGrid';
+            toggleGridBtn.className = 'tool-btn';
+            toggleGridBtn.textContent = 'Grid On/Off';
+            topToolbar.appendChild(toggleGridBtn);
+            const toggleBoundsBtn = document.createElement('button');
+            toggleBoundsBtn.id = 'toggleBounds';
+            toggleBoundsBtn.className = 'tool-btn';
+            toggleBoundsBtn.textContent = 'Bounds On/Off';
+            topToolbar.appendChild(toggleBoundsBtn);
+            const measureBtn = document.createElement('button');
+            measureBtn.id = 'measure';
+            measureBtn.className = 'tool-btn';
+            measureBtn.title = 'Measure Tool';
+            measureBtn.textContent = '📐 Measure';
+            topToolbar.appendChild(measureBtn);
+            const hint = document.createElement('span');
+            hint.className = 'hint';
+            hint.textContent = 'Volume Footprint Chart';
+            topToolbar.appendChild(hint);
+            container.appendChild(topToolbar);
+            // Create chart container
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'vfc-chart-container';
+            container.appendChild(chartContainer);
+            // Set up event handlers
+            this.setupToolbarEventHandlers(container);
+        }
+        setupToolbarEventHandlers(container) {
+            const loadDataBtn = container.querySelector('#loadData');
+            const resetZoomBtn = container.querySelector('#resetZoom');
+            const toggleGridBtn = container.querySelector('#toggleGrid');
+            const toggleBoundsBtn = container.querySelector('#toggleBounds');
+            const measureBtn = container.querySelector('#measure');
+            // Store references for later use
+            this.loadDataBtn = loadDataBtn;
+            this.resetZoomBtn = resetZoomBtn;
+            this.toggleGridBtn = toggleGridBtn;
+            this.toggleBoundsBtn = toggleBoundsBtn;
+            this.measureBtn = measureBtn;
+        }
         constructor(container, options = {}, events = {}) {
             var _a, _b;
             this.data = [];
             this.events = {};
             // Chart state
-            this.margin = { top: 0, bottom: 40, left: 0, right: 40 };
+            this.margin = { top: 0, bottom: 40, left: 0, right: 70 };
             this.view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
             this.showGrid = true;
             this.showBounds = false;
             this.crosshair = { x: -1, y: -1, visible: false };
             this.lastPrice = null;
+            // Toolbar button references
+            this.loadDataBtn = null;
+            this.resetZoomBtn = null;
+            this.toggleGridBtn = null;
+            this.toggleBoundsBtn = null;
+            this.measureBtn = null;
             // Constants
             this.TICK = 10;
             this.BASE_CANDLE = 15;
@@ -693,11 +896,20 @@
             this.FIXED_GAP = 4;
             this.baseRowPx = 22;
             this.TEXT_VIS = { minZoomX: 0.5, minRowPx: 10, minBoxPx: 20 };
+            // Create the complete chart structure with toolbars
+            this.createChartStructure(container);
             // Use existing canvas if available, otherwise create one
             this.canvas = container.querySelector('canvas');
             if (!this.canvas) {
                 this.canvas = document.createElement('canvas');
-                container.appendChild(this.canvas);
+                const chartContainer = container.querySelector('.vfc-chart-container');
+                if (chartContainer) {
+                    chartContainer.appendChild(this.canvas);
+                }
+                else {
+                    // Fallback: append directly to container if chart container not found
+                    container.appendChild(this.canvas);
+                }
             }
             const ctx = this.canvas.getContext('2d');
             if (!ctx)
@@ -727,10 +939,11 @@
                 onPan: () => this.drawing.drawAll(),
                 onZoom: () => this.drawing.drawAll(),
                 onMouseMove: () => this.drawing.drawAll()
-            }, this.crosshair);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice);
+            }, this.crosshair, this.scales);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
             this.setupCanvas();
             this.bindEvents();
+            this.bindToolbarEvents();
             this.layout();
         }
         setupCanvas() {
@@ -746,6 +959,51 @@
             this.canvas.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
             this.canvas.addEventListener('pointerdown', this.handlePointerDown.bind(this));
             window.addEventListener('resize', this.layout.bind(this));
+        }
+        bindToolbarEvents() {
+            if (this.loadDataBtn) {
+                this.loadDataBtn.addEventListener('click', () => {
+                    // This will be handled by external code, but we can provide a default behavior
+                    console.log('Load Data clicked - implement external data loading');
+                });
+            }
+            if (this.resetZoomBtn) {
+                this.resetZoomBtn.addEventListener('click', () => {
+                    this.updateOptions({
+                        width: this.options.width,
+                        height: this.options.height
+                    });
+                });
+            }
+            if (this.toggleGridBtn) {
+                this.toggleGridBtn.addEventListener('click', () => {
+                    this.updateOptions({
+                        showGrid: !this.options.showGrid
+                    });
+                });
+            }
+            if (this.toggleBoundsBtn) {
+                this.toggleBoundsBtn.addEventListener('click', () => {
+                    this.updateOptions({
+                        showBounds: !this.options.showBounds
+                    });
+                });
+            }
+            if (this.measureBtn) {
+                this.measureBtn.addEventListener('click', () => {
+                    var _a, _b;
+                    const isActive = this.interactions.getMeasureRectangle() !== null;
+                    if (isActive) {
+                        this.interactions.setMeasureMode(false);
+                        (_a = this.measureBtn) === null || _a === void 0 ? void 0 : _a.classList.remove('active');
+                    }
+                    else {
+                        this.interactions.setMeasureMode(true);
+                        (_b = this.measureBtn) === null || _b === void 0 ? void 0 : _b.classList.add('active');
+                    }
+                    this.drawing.drawAll();
+                });
+            }
         }
         handleWheel(e) {
             this.interactions.handleWheel(e);
@@ -773,8 +1031,8 @@
             }
             // Update scales with new data
             this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.TICK, this.baseRowPx, this.TEXT_VIS);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice // Now has the correct value
-            );
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
+            this.interactions);
             // Set initial view to show the end of the chart (latest data) and center the last price vertically
             if (data.length > 0) {
                 const s = this.scales.scaledSpacing();

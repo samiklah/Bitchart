@@ -11,6 +11,11 @@ export declare class Chart {
     private showBounds;
     private crosshair;
     private lastPrice;
+    private loadDataBtn;
+    private resetZoomBtn;
+    private toggleGridBtn;
+    private toggleBoundsBtn;
+    private measureBtn;
     private readonly TICK;
     private readonly BASE_CANDLE;
     private readonly BASE_BOX;
@@ -22,9 +27,12 @@ export declare class Chart {
     private scales;
     private interactions;
     private drawing;
+    private createChartStructure;
+    private setupToolbarEventHandlers;
     constructor(container: HTMLElement, options?: VFCOptions, events?: VFCEvents);
     private setupCanvas;
     private bindEvents;
+    private bindToolbarEvents;
     private handleWheel;
     private handlePointerDown;
     private layout;

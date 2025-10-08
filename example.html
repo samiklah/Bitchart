@@ -7,18 +7,9 @@
   <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-  <div id="container" class="vfc-container">
-    <div class="vfc-toolbar">
-      <button id="loadData" class="tool-btn">Load Data</button>
-      <button id="resetZoom" class="tool-btn">Reset</button>
-      <button id="toggleGrid" class="tool-btn">Grid On/Off</button>
-      <button id="toggleBounds" class="tool-btn">Bounds On/Off</button>
-      <span class="hint">Volume Footprint Chart</span>
-    </div>
-    <div class="vfc-chart-container">
-      <canvas class="vfc-chart"></canvas>
-    </div>
-  </div>
+ <div id="container">
+   <!-- Toolbars and chart structure will be created automatically by the library -->
+ </div>
 
  <script src="dist/index.js"></script>
  <script>
@@ -28,46 +19,26 @@
 
   const container = document.getElementById('container');
 
-  // Create chart using the bitchart API
-  const chart = bitchart.createChart(container, {
+  // Create chart using the VFC Chart class directly
+  const chart = new bitchart.VFC(container, {
      width: window.innerWidth,
      height: window.innerHeight - 60, // Account for toolbar
-     grid: { horzLines: { visible: true } }
-   });
-
-   // Add volume footprint series
-   const series = chart.addVolumeFootprintSeries({
-     upColor: '#26a69a',
-     downColor: '#ef5350'
+     showGrid: true
    });
 
    // Generate demo data
    const candles = makeDemoCandles();
 
-   // Set up event listeners
-   document.getElementById('loadData').addEventListener('click', () => {
-     series.setData(candles);
-   });
-
-   document.getElementById('resetZoom').addEventListener('click', () => {
-     chart.applyOptions({
-       width: window.innerWidth,
-       height: window.innerHeight - 60
+   // Set up event listeners for Load Data button (others are handled automatically by the chart)
+   const loadDataBtn = document.getElementById('loadData');
+   if (loadDataBtn) {
+     loadDataBtn.addEventListener('click', () => {
+       chart.setData(candles);
      });
-   });
-
-   document.getElementById('toggleGrid').addEventListener('click', () => {
-     // Note: Grid toggle would need to be implemented in the chart options
-     console.log('Grid toggle clicked');
-   });
-
-   document.getElementById('toggleBounds').addEventListener('click', () => {
-     // Note: Bounds toggle would need to be implemented in the chart options
-     console.log('Bounds toggle clicked');
-   });
+   }
 
    // Load initial data - shows the end of the data
-   series.setData(candles);
+   chart.setData(candles);
 
    // Demo data generator (matches original)
    function randNorm(){

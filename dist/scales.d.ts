@@ -46,5 +46,7 @@ export declare class Scales {
     formatK(v: number): string;
     private get xShift();
     screenXToDataIndex(screenX: number): number;
+    screenXToExactDataIndex(screenX: number): number;
+    screenYToPrice(screenY: number): number;
     private get ladderTop();
 }

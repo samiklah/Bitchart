@@ -34,9 +34,14 @@
   background: #333;
 }
 
+.vfc-toolbar .tool-btn.active {
+  background: #26a69a;
+  border-color: #26a69a;
+}
+
 .vfc-chart-container {
-  flex: 1;
   width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 

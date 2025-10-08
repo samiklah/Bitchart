@@ -11,6 +11,7 @@ export declare class Drawing {
     private theme;
     private crosshair;
     private lastPrice;
+    private interactions;
     constructor(ctx: CanvasRenderingContext2D, data: CandleData[], margin: {
         top: number;
         bottom: number;
@@ -25,10 +26,11 @@ export declare class Drawing {
         x: number;
         y: number;
         visible: boolean;
-    }, lastPrice: number | null);
+    }, lastPrice: number | null, interactions: any);
     drawAll(): void;
     private drawGrid;
     private drawChart;
+    private drawMeasureRectangle;
     private drawScales;
     private drawBounds;
     private drawFootprint;

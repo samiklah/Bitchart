@@ -57,6 +57,12 @@ export interface VFCEvents {
     onPan?: (offsetX: number, offsetRows: number) => void;
     onMouseMove?: (x: number, y: number, visible: boolean) => void;
 }
+export interface MeasureRectangle {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+}
 export interface VFCEvents {
     onZoom?: (zoomX: number, zoomY: number) => void;
     onPan?: (offsetX: number, offsetRows: number) => void;

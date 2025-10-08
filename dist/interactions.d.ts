@@ -1,4 +1,5 @@
-import { VFCEvents } from './types';
+import { VFCEvents, MeasureRectangle } from './types';
+import { Scales } from './scales';
 export declare class Interactions {
     private canvas;
     private margin;
@@ -7,6 +8,9 @@ export declare class Interactions {
     private crosshair;
     private momentum;
     private readonly PAN_INVERT;
+    private scales;
+    private isMeasureMode;
+    private measureRectangle;
     constructor(canvas: HTMLCanvasElement, margin: {
         top: number;
         bottom: number;
@@ -21,9 +25,13 @@ export declare class Interactions {
         x: number;
         y: number;
         visible: boolean;
-    });
+    }, scales: Scales);
     handleWheel(e: WheelEvent): void;
     handlePointerDown(e: PointerEvent): void;
+    private handleMeasurePointerDown;
+    setMeasureMode(enabled: boolean): void;
+    getMeasureRectangle(): MeasureRectangle | null;
+    clearMeasureRectangle(): void;
     private cancelMomentum;
     private startMomentum;
     private stepMomentum;

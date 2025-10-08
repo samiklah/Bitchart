@@ -1,4 +1,5 @@
-import { VFCEvents } from './types';
+import { VFCEvents, MeasureRectangle } from './types';
+import { Scales } from './scales';
 
 export class Interactions {
   private canvas: HTMLCanvasElement;
@@ -8,19 +9,27 @@ export class Interactions {
   private crosshair: { x: number; y: number; visible: boolean };
   private momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
   private readonly PAN_INVERT = { x: true, y: false };
+  private scales: Scales;
+
+
+  // Measure state
+  private isMeasureMode = false;
+  private measureRectangle: MeasureRectangle | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
     margin: { top: number; bottom: number; left: number; right: number },
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
     events: VFCEvents,
-    crosshair: { x: number; y: number; visible: boolean }
+    crosshair: { x: number; y: number; visible: boolean },
+    scales: Scales
   ) {
     this.canvas = canvas;
     this.margin = margin;
     this.view = view;
     this.events = events;
     this.crosshair = crosshair;
+    this.scales = scales;
     this.setupMouseTracking();
   }
 
@@ -40,6 +49,7 @@ export class Interactions {
       this.view.zoomY *= (e.deltaY < 0 ? 1.1 : 0.9);
       this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
+      this.clearMeasureRectangle();
     } else if (overChartBody) {
       const prev = this.view.zoomX;
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
@@ -50,6 +60,7 @@ export class Interactions {
       // Adjust offsetX to keep the same startIndex (prevent scrolling)
       this.view.offsetX *= (next / prev);
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
+      this.clearMeasureRectangle();
     } else if (overTimeline) {
       // Timeline zoom: same mechanism as chart but only affects X axis
       const prev = this.view.zoomX;
@@ -58,10 +69,22 @@ export class Interactions {
       this.view.zoomX = next;
       this.view.offsetX *= (next / prev);
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
+      this.clearMeasureRectangle();
     }
   }
 
   handlePointerDown(e: PointerEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Check if we're in measure mode
+    if (this.isMeasureMode) {
+      this.handleMeasurePointerDown(e, x, y);
+      return;
+    }
+
+    // Normal pan mode
     this.canvas.setPointerCapture(e.pointerId);
     let lastX = e.clientX;
     let lastY = e.clientY;
@@ -82,6 +105,7 @@ export class Interactions {
       this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / (22 * this.view.zoomY); // rowHeightPx()
       velX = (this.PAN_INVERT.x ? -dx : dx) / dt;
       this.events.onPan?.(this.view.offsetX, this.view.offsetRows);
+      this.clearMeasureRectangle();
     };
 
     const onUp = () => {
@@ -95,6 +119,75 @@ export class Interactions {
     this.canvas.addEventListener('pointermove', onMove);
     this.canvas.addEventListener('pointerup', onUp);
     this.canvas.addEventListener('pointercancel', onUp);
+  }
+
+
+  private handleMeasurePointerDown(e: PointerEvent, x: number, y: number): void {
+    // Check if we're over the chart area
+    const chartRight = this.canvas.clientWidth - this.margin.right;
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const yBottom = canvasHeight - this.margin.bottom;
+
+    const overChartBody = x >= this.margin.left && x <= chartRight &&
+                          y >= this.margin.top && y <= yBottom;
+
+    if (!overChartBody) return;
+
+    this.canvas.setPointerCapture(e.pointerId);
+
+    // Start measuring from this point - store screen coordinates directly
+    this.measureRectangle = {
+      startX: x,
+      startY: y,
+      endX: x,
+      endY: y
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const currentX = ev.clientX - rect.left;
+      const currentY = ev.clientY - rect.top;
+
+      // Update the end point of the measure rectangle
+      if (this.measureRectangle) {
+        this.measureRectangle.endX = currentX;
+        this.measureRectangle.endY = currentY;
+      }
+
+      // Trigger redraw
+      this.events.onMouseMove?.(currentX, currentY, true);
+    };
+
+    const onUp = () => {
+      this.canvas.releasePointerCapture(e.pointerId);
+      this.canvas.removeEventListener('pointermove', onMove);
+      this.canvas.removeEventListener('pointerup', onUp);
+      this.canvas.removeEventListener('pointercancel', onUp);
+    };
+
+    this.canvas.addEventListener('pointermove', onMove);
+    this.canvas.addEventListener('pointerup', onUp);
+    this.canvas.addEventListener('pointercancel', onUp);
+  }
+
+
+
+
+
+  // Public methods for controlling measure mode
+  setMeasureMode(enabled: boolean): void {
+    this.isMeasureMode = enabled;
+    if (!enabled) {
+      this.measureRectangle = null;
+    }
+  }
+
+  getMeasureRectangle(): MeasureRectangle | null {
+    return this.measureRectangle;
+  }
+
+  clearMeasureRectangle(): void {
+    this.measureRectangle = null;
   }
 
   private cancelMomentum(): void {

@@ -11,12 +11,19 @@ export class Chart {
   private events: VFCEvents = {};
 
   // Chart state
-  private margin = { top: 0, bottom: 40, left: 0, right: 40 };
+  private margin = { top: 0, bottom: 40, left: 0, right: 70 };
   private view = { zoomY: 1, zoomX: 1, offsetRows: 0, offsetX: 0, offsetY: 0 };
   private showGrid = true;
   private showBounds = false;
   private crosshair = { x: -1, y: -1, visible: false };
   private lastPrice: number | null = null;
+
+  // Toolbar button references
+  private loadDataBtn: HTMLButtonElement | null = null;
+  private resetZoomBtn: HTMLButtonElement | null = null;
+  private toggleGridBtn: HTMLButtonElement | null = null;
+  private toggleBoundsBtn: HTMLButtonElement | null = null;
+  private measureBtn: HTMLButtonElement | null = null;
 
   // Constants
   private readonly TICK = 10;
@@ -33,12 +40,96 @@ export class Chart {
   private interactions: Interactions;
   private drawing: Drawing;
 
+  private createChartStructure(container: HTMLElement): void {
+    // Check if toolbars already exist
+    if (container.querySelector('.vfc-toolbar')) {
+      return; // Toolbars already exist, don't recreate
+    }
+
+    // Create the complete chart structure
+    container.classList.add('vfc-container');
+
+    // Create top toolbar
+    const topToolbar = document.createElement('div');
+    topToolbar.className = 'vfc-toolbar';
+
+    const loadDataBtn = document.createElement('button');
+    loadDataBtn.id = 'loadData';
+    loadDataBtn.className = 'tool-btn';
+    loadDataBtn.textContent = 'Load Data';
+    topToolbar.appendChild(loadDataBtn);
+
+    const resetZoomBtn = document.createElement('button');
+    resetZoomBtn.id = 'resetZoom';
+    resetZoomBtn.className = 'tool-btn';
+    resetZoomBtn.textContent = 'Reset';
+    topToolbar.appendChild(resetZoomBtn);
+
+    const toggleGridBtn = document.createElement('button');
+    toggleGridBtn.id = 'toggleGrid';
+    toggleGridBtn.className = 'tool-btn';
+    toggleGridBtn.textContent = 'Grid On/Off';
+    topToolbar.appendChild(toggleGridBtn);
+
+    const toggleBoundsBtn = document.createElement('button');
+    toggleBoundsBtn.id = 'toggleBounds';
+    toggleBoundsBtn.className = 'tool-btn';
+    toggleBoundsBtn.textContent = 'Bounds On/Off';
+    topToolbar.appendChild(toggleBoundsBtn);
+
+    const measureBtn = document.createElement('button');
+    measureBtn.id = 'measure';
+    measureBtn.className = 'tool-btn';
+    measureBtn.title = 'Measure Tool';
+    measureBtn.textContent = '📐 Measure';
+    topToolbar.appendChild(measureBtn);
+
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.textContent = 'Volume Footprint Chart';
+    topToolbar.appendChild(hint);
+
+    container.appendChild(topToolbar);
+
+    // Create chart container
+    const chartContainer = document.createElement('div');
+    chartContainer.className = 'vfc-chart-container';
+    container.appendChild(chartContainer);
+
+    // Set up event handlers
+    this.setupToolbarEventHandlers(container);
+  }
+
+  private setupToolbarEventHandlers(container: HTMLElement): void {
+    const loadDataBtn = container.querySelector('#loadData') as HTMLButtonElement;
+    const resetZoomBtn = container.querySelector('#resetZoom') as HTMLButtonElement;
+    const toggleGridBtn = container.querySelector('#toggleGrid') as HTMLButtonElement;
+    const toggleBoundsBtn = container.querySelector('#toggleBounds') as HTMLButtonElement;
+    const measureBtn = container.querySelector('#measure') as HTMLButtonElement;
+
+    // Store references for later use
+    this.loadDataBtn = loadDataBtn;
+    this.resetZoomBtn = resetZoomBtn;
+    this.toggleGridBtn = toggleGridBtn;
+    this.toggleBoundsBtn = toggleBoundsBtn;
+    this.measureBtn = measureBtn;
+  }
+
   constructor(container: HTMLElement, options: VFCOptions = {}, events: VFCEvents = {}) {
+    // Create the complete chart structure with toolbars
+    this.createChartStructure(container);
+
     // Use existing canvas if available, otherwise create one
     this.canvas = container.querySelector('canvas') as HTMLCanvasElement;
     if (!this.canvas) {
       this.canvas = document.createElement('canvas');
-      container.appendChild(this.canvas);
+      const chartContainer = container.querySelector('.vfc-chart-container') as HTMLElement;
+      if (chartContainer) {
+        chartContainer.appendChild(this.canvas);
+      } else {
+        // Fallback: append directly to container if chart container not found
+        container.appendChild(this.canvas);
+      }
     }
 
     const ctx = this.canvas.getContext('2d');
@@ -86,8 +177,10 @@ export class Chart {
         onZoom: () => this.drawing.drawAll(),
         onMouseMove: () => this.drawing.drawAll()
       },
-      this.crosshair
+      this.crosshair,
+      this.scales
     );
+
 
     this.drawing = new Drawing(
       this.ctx,
@@ -99,11 +192,13 @@ export class Chart {
       this.scales,
       this.options.theme,
       this.crosshair,
-      this.lastPrice
+      this.lastPrice,
+      this.interactions
     );
 
     this.setupCanvas();
     this.bindEvents();
+    this.bindToolbarEvents();
     this.layout();
   }
 
@@ -121,6 +216,55 @@ export class Chart {
     this.canvas.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
     this.canvas.addEventListener('pointerdown', this.handlePointerDown.bind(this));
     window.addEventListener('resize', this.layout.bind(this));
+  }
+
+  private bindToolbarEvents() {
+    if (this.loadDataBtn) {
+      this.loadDataBtn.addEventListener('click', () => {
+        // This will be handled by external code, but we can provide a default behavior
+        console.log('Load Data clicked - implement external data loading');
+      });
+    }
+
+    if (this.resetZoomBtn) {
+      this.resetZoomBtn.addEventListener('click', () => {
+        this.updateOptions({
+          width: this.options.width,
+          height: this.options.height
+        });
+      });
+    }
+
+    if (this.toggleGridBtn) {
+      this.toggleGridBtn.addEventListener('click', () => {
+        this.updateOptions({
+          showGrid: !this.options.showGrid
+        });
+      });
+    }
+
+    if (this.toggleBoundsBtn) {
+      this.toggleBoundsBtn.addEventListener('click', () => {
+        this.updateOptions({
+          showBounds: !this.options.showBounds
+        });
+      });
+    }
+
+
+    if (this.measureBtn) {
+      this.measureBtn.addEventListener('click', () => {
+        const isActive = this.interactions.getMeasureRectangle() !== null;
+        if (isActive) {
+          this.interactions.setMeasureMode(false);
+          this.measureBtn?.classList.remove('active');
+        } else {
+          this.interactions.setMeasureMode(true);
+          this.measureBtn?.classList.add('active');
+        }
+        this.drawing.drawAll();
+      });
+    }
   }
 
   private handleWheel(e: WheelEvent) {
@@ -174,7 +318,8 @@ export class Chart {
       this.scales,
       this.options.theme,
       this.crosshair,
-      this.lastPrice  // Now has the correct value
+      this.lastPrice,  // Now has the correct value
+      this.interactions
     );
 
     // Set initial view to show the end of the chart (latest data) and center the last price vertically
@@ -209,6 +354,7 @@ export class Chart {
       this.canvas.parentElement.removeChild(this.canvas);
     }
   }
+
 
   // Getters for API access
   public getOptions() { return this.options; }

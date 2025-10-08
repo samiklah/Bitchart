@@ -1,4 +1,4 @@
-import { CandleData, VFCTheme } from './types';
+import { CandleData, VFCTheme, MeasureRectangle } from './types';
 import { Scales } from './scales';
 
 export class Drawing {
@@ -12,6 +12,7 @@ export class Drawing {
   private theme: VFCTheme;
   private crosshair: { x: number; y: number; visible: boolean };
   private lastPrice: number | null;
+  private interactions: any; // Reference to Interactions class to get dynamic measure rectangle
 
   constructor(
     ctx: CanvasRenderingContext2D,
@@ -23,7 +24,8 @@ export class Drawing {
     scales: Scales,
     theme: VFCTheme,
     crosshair: { x: number; y: number; visible: boolean },
-    lastPrice: number | null
+    lastPrice: number | null,
+    interactions: any
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -35,6 +37,7 @@ export class Drawing {
     this.theme = theme;
     this.crosshair = crosshair;
     this.lastPrice = lastPrice;
+    this.interactions = interactions;
   }
 
   drawAll(): void {
@@ -43,6 +46,7 @@ export class Drawing {
     this.ctx.clearRect(0, 0, width, height);
     if (this.showGrid) this.drawGrid();
     this.drawChart();
+    this.drawMeasureRectangle();
     this.drawScales();
     this.drawCurrentPriceLabel();
     if (this.crosshair.visible) this.drawCrosshair();
@@ -92,6 +96,74 @@ export class Drawing {
     for (let i = vr.startIndex; i < vr.endIndex; i++) {
       this.drawFootprint(this.data[i], i, vr.startIndex);
     }
+    this.ctx.restore();
+  }
+
+
+  private drawMeasureRectangle(): void {
+    const measureRectangle = this.interactions.getMeasureRectangle();
+    if (!measureRectangle) return;
+
+    this.ctx.save();
+
+    // Use screen coordinates directly
+    const startX = measureRectangle.startX;
+    const startY = measureRectangle.startY;
+    const endX = measureRectangle.endX;
+    const endY = measureRectangle.endY;
+
+    // Calculate rectangle bounds
+    const rectX = Math.min(startX, endX);
+    const rectY = Math.min(startY, endY);
+    const rectWidth = Math.abs(endX - startX);
+    const rectHeight = Math.abs(endY - startY);
+
+    // Draw transparent blue rectangle
+    this.ctx.fillStyle = 'rgba(0, 0, 255, 0.2)'; // Transparent blue
+    this.ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+
+    // Draw rectangle border
+    this.ctx.strokeStyle = 'rgba(0, 0, 255, 0.8)';
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+
+    // Calculate price and time differences using current screen positions
+    const startPrice = this.scales.screenYToPrice(startY);
+    const endPrice = this.scales.screenYToPrice(endY);
+    const startIndex = this.scales.screenXToDataIndex(startX);
+    const endIndex = this.scales.screenXToDataIndex(endX);
+
+    const priceDiff = endPrice - startPrice;
+    const timeDiff = endIndex - startIndex;
+
+    // Draw measurement labels
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = '11px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+
+    const centerX = rectX + rectWidth / 2;
+    const centerY = rectY + rectHeight / 2;
+
+    // Calculate percentage change
+    const percentChange = startPrice !== 0 ? (priceDiff / startPrice) * 100 : 0;
+
+    // Draw price difference with sign
+    const priceSign = priceDiff >= 0 ? '+' : '';
+    const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
+    this.ctx.fillText(priceText, centerX, centerY - 20);
+
+    // Draw start and end prices
+    const startPriceText = `Start: ${startPrice.toFixed(2)}`;
+    const endPriceText = `End: ${endPrice.toFixed(2)}`;
+    this.ctx.fillText(startPriceText, centerX, centerY - 5);
+    this.ctx.fillText(endPriceText, centerX, centerY + 5);
+
+    // Draw time difference
+    const timeSign = timeDiff >= 0 ? '+' : '';
+    const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
+    this.ctx.fillText(timeText, centerX, centerY + 20);
+
     this.ctx.restore();
   }
 
@@ -394,7 +466,7 @@ export class Drawing {
     this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
     this.ctx.strokeRect(chartRight, this.crosshair.y - 8, this.margin.right, 16);
     this.ctx.fillStyle = this.theme.textColor || '#aaa';
-    this.ctx.font = '11px system-ui';
+    this.ctx.font = 'bold 12px system-ui';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
     this.ctx.fillText(price.toFixed(2), chartRight + this.margin.right / 2, this.crosshair.y);
