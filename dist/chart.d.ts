@@ -14,11 +14,13 @@ export declare class Chart {
     private showGrid;
     private showBounds;
     private showVolumeFootprint;
+    private showVolumeHeatmap;
     private crosshair;
     private lastPrice;
     private resetZoomBtn;
     private toggleGridBtn;
     private toggleVolumeFootprintBtn;
+    private volumeHeatmapBtn;
     private measureBtn;
     private readonly TICK;
     private readonly BASE_CANDLE;

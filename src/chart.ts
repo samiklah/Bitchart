@@ -21,6 +21,7 @@ export class Chart {
    private showGrid = true;
    private showBounds = false;
    private showVolumeFootprint = true;
+   private showVolumeHeatmap = false;
    private crosshair = { x: -1, y: -1, visible: false };
    private lastPrice: number | null = null;
 
@@ -28,6 +29,7 @@ export class Chart {
    private resetZoomBtn: HTMLButtonElement | null = null;
    private toggleGridBtn: HTMLButtonElement | null = null;
    private toggleVolumeFootprintBtn: HTMLButtonElement | null = null;
+   private volumeHeatmapBtn: HTMLButtonElement | null = null;
    private measureBtn: HTMLButtonElement | null = null;
 
    // Constants
@@ -77,6 +79,12 @@ export class Chart {
     toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
     topToolbar.appendChild(toggleVolumeFootprintBtn);
 
+    const volumeHeatmapBtn = document.createElement('button');
+    volumeHeatmapBtn.id = 'volumeHeatmap';
+    volumeHeatmapBtn.className = 'tool-btn';
+    volumeHeatmapBtn.textContent = 'Volume Heatmap';
+    topToolbar.appendChild(volumeHeatmapBtn);
+
     const measureBtn = document.createElement('button');
     measureBtn.id = 'measure';
     measureBtn.className = 'tool-btn';
@@ -104,12 +112,14 @@ export class Chart {
     const resetZoomBtn = container.querySelector('#resetZoom') as HTMLButtonElement;
     const toggleGridBtn = container.querySelector('#toggleGrid') as HTMLButtonElement;
     const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint') as HTMLButtonElement;
+    const volumeHeatmapBtn = container.querySelector('#volumeHeatmap') as HTMLButtonElement;
     const measureBtn = container.querySelector('#measure') as HTMLButtonElement;
 
     // Store references for later use
     this.resetZoomBtn = resetZoomBtn;
     this.toggleGridBtn = toggleGridBtn;
     this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
+    this.volumeHeatmapBtn = volumeHeatmapBtn;
     this.measureBtn = measureBtn;
   }
 
@@ -149,6 +159,7 @@ export class Chart {
       showGrid: options.showGrid ?? true,
       showBounds: options.showBounds ?? false,
       showVolumeFootprint: options.showVolumeFootprint ?? true,
+      showVolumeHeatmap: options.showVolumeHeatmap ?? false,
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 0.55,
       initialZoomY: options.initialZoomY || 0.55,
@@ -160,6 +171,7 @@ export class Chart {
     this.showGrid = this.options.showGrid;
     this.showBounds = this.options.showBounds;
     this.showVolumeFootprint = this.options.showVolumeFootprint;
+    this.showVolumeHeatmap = this.options.showVolumeHeatmap;
     this.view.zoomX = this.options.initialZoomX;
     this.view.zoomY = this.options.initialZoomY;
   }
@@ -202,6 +214,7 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.showVolumeFootprint,
+      this.showVolumeHeatmap,
       this.scales,
       this.options.theme,
       this.crosshair,
@@ -293,6 +306,14 @@ export class Chart {
       });
     }
 
+    if (this.volumeHeatmapBtn) {
+      this.volumeHeatmapBtn.addEventListener('click', () => {
+        this.updateOptions({
+          showVolumeHeatmap: !this.options.showVolumeHeatmap
+        });
+      });
+    }
+
     if (this.measureBtn) {
       this.measureBtn.addEventListener('click', () => {
         const isActive = this.interactions.getMeasureRectangle() !== null;
@@ -345,6 +366,7 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.showVolumeFootprint,
+      this.showVolumeHeatmap,
       this.scales,
       this.options.theme,
       this.crosshair,
@@ -387,6 +409,7 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.showVolumeFootprint,
+      this.showVolumeHeatmap,
       this.scales,
       this.options.theme,
       this.crosshair,
@@ -416,6 +439,7 @@ export class Chart {
     this.showGrid = this.options.showGrid;
     this.showBounds = this.options.showBounds;
     this.showVolumeFootprint = this.options.showVolumeFootprint;
+    this.showVolumeHeatmap = this.options.showVolumeHeatmap;
 
     // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
     if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
@@ -446,6 +470,7 @@ export class Chart {
       this.showGrid,
       this.showBounds,
       this.showVolumeFootprint,
+      this.showVolumeHeatmap,
       this.scales,
       this.options.theme,
       this.crosshair,

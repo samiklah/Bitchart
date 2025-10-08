@@ -961,7 +961,7 @@ function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
  * Responsible for drawing grid, chart elements, scales, crosshair, and measurements.
  */
 class Drawing {
-    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, scales, theme, crosshair, lastPrice, interactions) {
+    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, scales, theme, crosshair, lastPrice, interactions) {
         this.ctx = ctx;
         this.data = data;
         this.margin = margin;
@@ -969,6 +969,7 @@ class Drawing {
         this.showGrid = showGrid;
         this.showBounds = showBounds;
         this.showVolumeFootprint = showVolumeFootprint;
+        this.showVolumeHeatmap = showVolumeHeatmap;
         this.scales = scales;
         this.theme = theme;
         this.crosshair = crosshair;
@@ -981,6 +982,8 @@ class Drawing {
         this.ctx.clearRect(0, 0, width, height);
         if (this.showGrid)
             drawGrid(this.ctx, width, this.margin, this.scales, this.theme);
+        if (this.showVolumeHeatmap)
+            this.drawVolumeHeatmap();
         this.drawChart();
         drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
         drawScales(this.ctx, width, height, this.margin, this.scales, this.data, this.theme);
@@ -999,6 +1002,40 @@ class Drawing {
         const vr = this.scales.getVisibleRange();
         for (let i = vr.startIndex; i < vr.endIndex; i++) {
             drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint);
+        }
+        this.ctx.restore();
+    }
+    drawVolumeHeatmap() {
+        const vr = this.scales.getVisibleRange();
+        if (vr.endIndex <= vr.startIndex)
+            return;
+        // Aggregate volumes per price level across visible candles
+        const volumeMap = new Map();
+        for (let i = vr.startIndex; i < vr.endIndex; i++) {
+            const candle = this.data[i];
+            for (const level of candle.footprint) {
+                const totalVol = level.buy + level.sell;
+                volumeMap.set(level.price, (volumeMap.get(level.price) || 0) + totalVol);
+            }
+        }
+        if (volumeMap.size === 0)
+            return;
+        // Find max volume
+        const maxVolume = Math.max(...volumeMap.values());
+        // Draw heatmap
+        this.ctx.save();
+        const width = this.ctx.canvas.width / window.devicePixelRatio;
+        this.ctx.beginPath();
+        this.ctx.rect(this.margin.left, this.margin.top, width - this.margin.left - this.margin.right, this.scales.chartHeight());
+        this.ctx.clip();
+        for (const [price, volume] of volumeMap) {
+            const row = this.scales.priceToRowIndex(price);
+            const yTop = this.scales.rowToY(row - 0.5);
+            const yBot = this.scales.rowToY(row + 0.5);
+            const h = Math.max(1, yBot - yTop);
+            const alpha = maxVolume > 0 ? volume / maxVolume : 0;
+            this.ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`;
+            this.ctx.fillRect(this.margin.left, yTop, width - this.margin.left - this.margin.right, h);
         }
         this.ctx.restore();
     }
@@ -1034,6 +1071,11 @@ class Chart {
         toggleVolumeFootprintBtn.className = 'tool-btn';
         toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
         topToolbar.appendChild(toggleVolumeFootprintBtn);
+        const volumeHeatmapBtn = document.createElement('button');
+        volumeHeatmapBtn.id = 'volumeHeatmap';
+        volumeHeatmapBtn.className = 'tool-btn';
+        volumeHeatmapBtn.textContent = 'Volume Heatmap';
+        topToolbar.appendChild(volumeHeatmapBtn);
         const measureBtn = document.createElement('button');
         measureBtn.id = 'measure';
         measureBtn.className = 'tool-btn';
@@ -1056,11 +1098,13 @@ class Chart {
         const resetZoomBtn = container.querySelector('#resetZoom');
         const toggleGridBtn = container.querySelector('#toggleGrid');
         const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint');
+        const volumeHeatmapBtn = container.querySelector('#volumeHeatmap');
         const measureBtn = container.querySelector('#measure');
         // Store references for later use
         this.resetZoomBtn = resetZoomBtn;
         this.toggleGridBtn = toggleGridBtn;
         this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
+        this.volumeHeatmapBtn = volumeHeatmapBtn;
         this.measureBtn = measureBtn;
     }
     /**
@@ -1093,13 +1137,14 @@ class Chart {
      * @param chartContainer The chart container element
      */
     initializeOptions(options, container, chartContainer) {
-        var _a, _b, _c;
+        var _a, _b, _c, _d;
         this.options = {
             width: options.width || container.clientWidth || 800,
             height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
             showGrid: (_a = options.showGrid) !== null && _a !== void 0 ? _a : true,
             showBounds: (_b = options.showBounds) !== null && _b !== void 0 ? _b : false,
             showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
+            showVolumeHeatmap: (_d = options.showVolumeHeatmap) !== null && _d !== void 0 ? _d : false,
             tickSize: options.tickSize || 10,
             initialZoomX: options.initialZoomX || 0.55,
             initialZoomY: options.initialZoomY || 0.55,
@@ -1110,6 +1155,7 @@ class Chart {
         this.showGrid = this.options.showGrid;
         this.showBounds = this.options.showBounds;
         this.showVolumeFootprint = this.options.showVolumeFootprint;
+        this.showVolumeHeatmap = this.options.showVolumeHeatmap;
         this.view.zoomX = this.options.initialZoomX;
         this.view.zoomY = this.options.initialZoomY;
     }
@@ -1124,7 +1170,7 @@ class Chart {
             onZoom: () => this.drawing.drawAll(),
             onMouseMove: () => this.drawing.drawAll()
         }, this.crosshair, this.scales);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
     }
     constructor(container, options = {}, events = {}) {
         this.data = [];
@@ -1135,12 +1181,14 @@ class Chart {
         this.showGrid = true;
         this.showBounds = false;
         this.showVolumeFootprint = true;
+        this.showVolumeHeatmap = false;
         this.crosshair = { x: -1, y: -1, visible: false };
         this.lastPrice = null;
         // Toolbar button references
         this.resetZoomBtn = null;
         this.toggleGridBtn = null;
         this.toggleVolumeFootprintBtn = null;
+        this.volumeHeatmapBtn = null;
         this.measureBtn = null;
         // Constants
         this.TICK = 10;
@@ -1221,6 +1269,13 @@ class Chart {
                 });
             });
         }
+        if (this.volumeHeatmapBtn) {
+            this.volumeHeatmapBtn.addEventListener('click', () => {
+                this.updateOptions({
+                    showVolumeHeatmap: !this.options.showVolumeHeatmap
+                });
+            });
+        }
         if (this.measureBtn) {
             this.measureBtn.addEventListener('click', () => {
                 var _a, _b;
@@ -1252,7 +1307,7 @@ class Chart {
         }
         // Recreate scales and drawing with new dimensions
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.setupCanvas();
         this.drawing.drawAll();
     }
@@ -1266,7 +1321,7 @@ class Chart {
         }
         // Update scales with new data
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
         this.interactions);
         // Set initial view to show the end of the chart (latest data) and center the last price vertically
         if (data.length > 0) {
@@ -1289,6 +1344,7 @@ class Chart {
         this.showGrid = this.options.showGrid;
         this.showBounds = this.options.showBounds;
         this.showVolumeFootprint = this.options.showVolumeFootprint;
+        this.showVolumeHeatmap = this.options.showVolumeHeatmap;
         // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
         if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
             const oldSpacing = oldShowVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
@@ -1298,7 +1354,7 @@ class Chart {
         }
         // Recreate Scales first, then Drawing
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.layout();
     }
     resize(width, height) {

@@ -97,6 +97,8 @@ export interface VFCOptions {
     showBounds?: boolean;
     /** Whether to display volume footprint data. Default: true */
     showVolumeFootprint?: boolean;
+    /** Whether to display volume heatmap overlay. Default: false */
+    showVolumeHeatmap?: boolean;
     /** Price tick size for footprint levels. Default: 10 */
     tickSize?: number;
     /** Initial horizontal zoom level (time axis). Default: 0.55 */
