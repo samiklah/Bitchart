@@ -15,13 +15,20 @@ export declare class Chart {
     private showBounds;
     private showVolumeFootprint;
     private showVolumeHeatmap;
+    private volumeHeatmapDynamic;
     private crosshair;
     private lastPrice;
     private resetZoomBtn;
     private toggleGridBtn;
     private toggleVolumeFootprintBtn;
     private volumeHeatmapBtn;
+    private volumeHeatmapDropdown;
     private measureBtn;
+    private showCVD;
+    private cvdDynamic;
+    private cvdValues;
+    private cvdBaseline;
+    private cvdNormalize;
     private readonly TICK;
     private readonly BASE_CANDLE;
     private readonly BASE_BOX;
@@ -63,6 +70,10 @@ export declare class Chart {
     updateOptions(options: Partial<VFCOptions>): void;
     resize(width: number, height: number): void;
     destroy(): void;
+    private calculateCVD;
+    addCandle(candle: CandleData): void;
+    private updateButtonText;
+    private hideAllDropdowns;
     getOptions(): Required<VFCOptions>;
     getShowGrid(): boolean;
 }

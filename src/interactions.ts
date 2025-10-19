@@ -205,6 +205,10 @@ export class Interactions {
     }
   }
 
+  getMeasureMode(): boolean {
+    return this.isMeasureMode;
+  }
+
   getMeasureRectangle(): MeasureRectangle | null {
     return this.measureRectangle;
   }

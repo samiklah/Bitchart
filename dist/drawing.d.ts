@@ -13,6 +13,7 @@ export declare class Drawing {
     private showBounds;
     private showVolumeFootprint;
     private showVolumeHeatmap;
+    private volumeHeatmapDynamic;
     private scales;
     private theme;
     private crosshair;
@@ -28,7 +29,7 @@ export declare class Drawing {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, showGrid: boolean, showBounds: boolean, showVolumeFootprint: boolean, showVolumeHeatmap: boolean, scales: Scales, theme: VFCTheme, crosshair: {
+    }, showGrid: boolean, showBounds: boolean, showVolumeFootprint: boolean, showVolumeHeatmap: boolean, volumeHeatmapDynamic: boolean, scales: Scales, theme: VFCTheme, crosshair: {
         x: number;
         y: number;
         visible: boolean;
@@ -36,4 +37,5 @@ export declare class Drawing {
     drawAll(): void;
     private drawChart;
     private drawVolumeHeatmap;
+    private drawScales;
 }

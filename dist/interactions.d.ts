@@ -52,6 +52,7 @@ export declare class Interactions {
     handlePointerDown(e: PointerEvent): void;
     private handleMeasurePointerDown;
     setMeasureMode(enabled: boolean): void;
+    getMeasureMode(): boolean;
     getMeasureRectangle(): MeasureRectangle | null;
     clearMeasureRectangle(): void;
     private cancelMomentum;

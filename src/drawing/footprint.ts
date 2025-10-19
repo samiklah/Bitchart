@@ -131,6 +131,7 @@ export function drawValueAreaBoundaries(
   ctx.save();
   ctx.setLineDash([4, 2]);
   ctx.strokeStyle = theme.vahValColor || '#9ca3af';
+  ctx.lineWidth = 3; // Make VAH/VAL lines thicker
   ctx.beginPath();
   ctx.moveTo(leftX, yVah);
   ctx.lineTo(rightEdge, yVah);
@@ -140,6 +141,7 @@ export function drawValueAreaBoundaries(
   ctx.lineTo(rightEdge, yVal);
   ctx.stroke();
   ctx.setLineDash([]);
+  // ctx.lineWidth = 1; // Reset line width
 
   const vahFontSize = Math.max(6, Math.min(12, 8 * zoomX));
   ctx.fillStyle = theme.vahValLabelColor || '#cfd3d6';
@@ -168,13 +170,15 @@ export function drawDeltaTotalLabels(
 ): void {
   const yLowFootprint = scales.rowToY(maxRow) + 2;
   const delta = totBuy - totSell;
+  const deltaPercent = totalVol > 0 ? (delta / totalVol) * 100 : 0;
   const deltaFontSize = Math.max(8, Math.min(18, 12 * zoomX));
   ctx.textAlign = 'center';
   ctx.font = `${deltaFontSize}px system-ui`;
   ctx.fillStyle = delta >= 0 ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
   ctx.fillText(`Delta ${scales.formatK(delta)}`, cx, yLowFootprint + 14);
+  ctx.fillText(`${deltaPercent >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%`, cx, yLowFootprint + 28);
   ctx.fillStyle = theme.totalColor || '#fff';
-  ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
+  ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 46);
 }
 
 /**

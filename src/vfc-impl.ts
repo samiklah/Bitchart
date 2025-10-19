@@ -49,6 +49,7 @@ export class VFC {
       showBounds: options.showBounds ?? false,
       showVolumeFootprint: options.showVolumeFootprint ?? true,
       showVolumeHeatmap: options.showVolumeHeatmap ?? false,
+      volumeHeatmapDynamic: options.volumeHeatmapDynamic ?? true,
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 1,
       initialZoomY: options.initialZoomY || 1,

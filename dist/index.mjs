@@ -390,6 +390,9 @@ class Interactions {
             this.measureRectangle = null;
         }
     }
+    getMeasureMode() {
+        return this.isMeasureMode;
+    }
     getMeasureRectangle() {
         return this.measureRectangle;
     }
@@ -543,6 +546,7 @@ function drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales,
     ctx.save();
     ctx.setLineDash([4, 2]);
     ctx.strokeStyle = theme.vahValColor || '#9ca3af';
+    ctx.lineWidth = 3; // Make VAH/VAL lines thicker
     ctx.beginPath();
     ctx.moveTo(leftX, yVah);
     ctx.lineTo(rightEdge, yVah);
@@ -552,6 +556,7 @@ function drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales,
     ctx.lineTo(rightEdge, yVal);
     ctx.stroke();
     ctx.setLineDash([]);
+    // ctx.lineWidth = 1; // Reset line width
     const vahFontSize = Math.max(6, Math.min(12, 8 * zoomX));
     ctx.fillStyle = theme.vahValLabelColor || '#cfd3d6';
     ctx.font = `${vahFontSize}px monospace`;
@@ -568,13 +573,15 @@ function drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales,
 function drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, zoomX) {
     const yLowFootprint = scales.rowToY(maxRow) + 2;
     const delta = totBuy - totSell;
+    const deltaPercent = totalVol > 0 ? (delta / totalVol) * 100 : 0;
     const deltaFontSize = Math.max(8, Math.min(18, 12 * zoomX));
     ctx.textAlign = 'center';
     ctx.font = `${deltaFontSize}px system-ui`;
     ctx.fillStyle = delta >= 0 ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
     ctx.fillText(`Delta ${scales.formatK(delta)}`, cx, yLowFootprint + 14);
+    ctx.fillText(`${deltaPercent >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%`, cx, yLowFootprint + 28);
     ctx.fillStyle = theme.totalColor || '#fff';
-    ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 32);
+    ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 46);
 }
 /**
  * Draws the traditional candlestick wick (high/low line) and body (open/close rectangle).
@@ -625,93 +632,6 @@ function drawFootprint(ctx, candle, i, startIndex, scales, theme, view, showVolu
     }
     // Draw candle wick and body
     drawCandleWickAndBody(ctx, cx, half, candle, scales, theme);
-}
-
-/**
- * Scale and axis drawing functions for the Volume Footprint Chart.
- * Handles rendering of price bars, timeline, and related scale elements.
- */
-/**
- * Draws the price bar on the right side and price labels.
- */
-function drawPriceBar(ctx, width, height, margin, scales, theme) {
-    const right = width - margin.right;
-    ctx.fillStyle = theme.scaleBackground || '#111';
-    ctx.fillRect(right, 0, margin.right, height);
-    ctx.strokeStyle = theme.scaleBorder || '#444';
-    ctx.strokeRect(right + 0.5, margin.top, 0.5, height - margin.top - margin.bottom);
-    // Price labels
-    ctx.fillStyle = theme.textColor || '#aaa';
-    ctx.font = '12px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const labels = scales.computePriceBarLabels();
-    for (const { price, y } of labels) {
-        ctx.fillText(scales.formatK(price), right + margin.right / 2, y);
-    }
-}
-/**
- * Draws the timeline at the bottom with time labels.
- */
-function drawTimeline(ctx, width, height, margin, scales, data, theme) {
-    const bottomY = margin.top + (height - margin.top - margin.bottom);
-    const chartW = width - margin.left - margin.right;
-    ctx.fillStyle = theme.scaleBackground || '#111';
-    ctx.fillRect(margin.left, bottomY, chartW, margin.bottom);
-    ctx.strokeStyle = theme.scaleBorder || '#444';
-    ctx.beginPath();
-    ctx.moveTo(margin.left, bottomY + 0.5);
-    ctx.lineTo(margin.left + chartW, bottomY + 0.5);
-    ctx.stroke();
-    // Timeline labels - extended to show future times
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(margin.left, bottomY, chartW, margin.bottom);
-    ctx.clip();
-    ctx.fillStyle = theme.textColor || '#aaa';
-    ctx.font = '12px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const step = Math.max(1, Math.floor(120 / scales.scaledSpacing()));
-    const vr = scales.getVisibleRange();
-    // Extend timeline to show future times beyond current data
-    const extendedStart = Math.max(0, vr.startIndex - 10);
-    const extendedEnd = vr.endIndex + 30; // Show 30 future time slots
-    for (let i = extendedStart; i < extendedEnd; i += step) {
-        const x = scales.indexToX(i, vr.startIndex);
-        let date;
-        if (i < data.length && data[i]) {
-            date = new Date(data[i].time);
-        }
-        else {
-            // Extrapolate future times based on data intervals
-            if (data.length > 1) {
-                const lastTime = new Date(data[data.length - 1].time).getTime();
-                const prevTime = new Date(data[data.length - 2].time).getTime();
-                const interval = lastTime - prevTime; // Time between last two data points
-                date = new Date(lastTime + (i - data.length + 1) * interval);
-            }
-            else {
-                // Fallback: assume 1 minute intervals
-                const lastTime = data.length > 0 ?
-                    new Date(data[data.length - 1].time).getTime() :
-                    Date.now();
-                date = new Date(lastTime + (i - Math.max(0, data.length - 1)) * 60000);
-            }
-        }
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        const t = `${hours}:${minutes}`;
-        ctx.fillText(t, x, bottomY + margin.bottom / 2);
-    }
-    ctx.restore();
-}
-/**
- * Draws the complete scales (price bar and timeline).
- */
-function drawScales(ctx, width, height, margin, scales, data, theme) {
-    drawPriceBar(ctx, width, height, margin, scales, theme);
-    drawTimeline(ctx, width, height, margin, scales, data, theme);
 }
 
 /**
@@ -961,7 +881,7 @@ function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
  * Responsible for drawing grid, chart elements, scales, crosshair, and measurements.
  */
 class Drawing {
-    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, scales, theme, crosshair, lastPrice, interactions) {
+    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions) {
         this.ctx = ctx;
         this.data = data;
         this.margin = margin;
@@ -970,6 +890,7 @@ class Drawing {
         this.showBounds = showBounds;
         this.showVolumeFootprint = showVolumeFootprint;
         this.showVolumeHeatmap = showVolumeHeatmap;
+        this.volumeHeatmapDynamic = volumeHeatmapDynamic;
         this.scales = scales;
         this.theme = theme;
         this.crosshair = crosshair;
@@ -986,7 +907,7 @@ class Drawing {
             this.drawVolumeHeatmap();
         this.drawChart();
         drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
-        drawScales(this.ctx, width, height, this.margin, this.scales, this.data, this.theme);
+        this.drawScales(width, height);
         drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
         if (this.crosshair.visible)
             drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
@@ -1009,9 +930,12 @@ class Drawing {
         const vr = this.scales.getVisibleRange();
         if (vr.endIndex <= vr.startIndex)
             return;
-        // Aggregate volumes per price level across visible candles
+        // Choose data range based on dynamic flag
+        const startIndex = this.volumeHeatmapDynamic ? vr.startIndex : 0;
+        const endIndex = this.volumeHeatmapDynamic ? vr.endIndex : this.data.length;
+        // Aggregate volumes per price level across selected candles
         const volumeMap = new Map();
-        for (let i = vr.startIndex; i < vr.endIndex; i++) {
+        for (let i = startIndex; i < endIndex; i++) {
             const candle = this.data[i];
             for (const level of candle.footprint) {
                 const totalVol = level.buy + level.sell;
@@ -1033,9 +957,57 @@ class Drawing {
             const yTop = this.scales.rowToY(row - 0.5);
             const yBot = this.scales.rowToY(row + 0.5);
             const h = Math.max(1, yBot - yTop);
-            const alpha = maxVolume > 0 ? volume / maxVolume : 0;
+            const alpha = maxVolume > 0 ? (volume / maxVolume) * 0.6 : 0; // Reduced brightness to 60% max
             this.ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`;
             this.ctx.fillRect(this.margin.left, yTop, width - this.margin.left - this.margin.right, h);
+        }
+        this.ctx.restore();
+    }
+    drawScales(width, height) {
+        // Timeline position (fixed at bottom, CVD is drawn separately above it)
+        const timelineY = height - this.margin.bottom;
+        // Draw price bar (unchanged)
+        const right = width - this.margin.right;
+        this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+        this.ctx.fillRect(right, 0, this.margin.right, height);
+        this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+        this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, height - this.margin.top - this.margin.bottom);
+        // Price labels
+        this.ctx.fillStyle = this.theme.textColor || '#aaa';
+        this.ctx.font = '12px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        const labels = this.scales.computePriceBarLabels();
+        for (const { price, y } of labels) {
+            this.ctx.fillText(this.scales.formatK(price), right + this.margin.right / 2, y);
+        }
+        // Draw timeline at bottom
+        const chartW = width - this.margin.left - this.margin.right;
+        this.ctx.fillStyle = this.theme.scaleBackground || '#111';
+        this.ctx.fillRect(this.margin.left, timelineY, chartW, this.margin.bottom);
+        this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.margin.left, timelineY + 0.5);
+        this.ctx.lineTo(this.margin.left + chartW, timelineY + 0.5);
+        this.ctx.stroke();
+        // Timeline labels
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.rect(this.margin.left, timelineY, chartW, this.margin.bottom);
+        this.ctx.clip();
+        this.ctx.fillStyle = this.theme.textColor || '#aaa';
+        this.ctx.font = '12px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        const step = Math.max(1, Math.floor(120 / this.scales.scaledSpacing()));
+        const vr = this.scales.getVisibleRange();
+        for (let i = vr.startIndex; i < vr.endIndex; i += step) {
+            const x = this.scales.indexToX(i, vr.startIndex);
+            const date = new Date(this.data[i].time);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const t = `${hours}:${minutes}`;
+            this.ctx.fillText(t, x, timelineY + this.margin.bottom / 2);
         }
         this.ctx.restore();
     }
@@ -1071,11 +1043,80 @@ class Chart {
         toggleVolumeFootprintBtn.className = 'tool-btn';
         toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
         topToolbar.appendChild(toggleVolumeFootprintBtn);
+        // Create volume heatmap dropdown container
+        const volumeHeatmapContainer = document.createElement('div');
+        volumeHeatmapContainer.className = 'dropdown-container';
+        volumeHeatmapContainer.style.position = 'relative';
+        volumeHeatmapContainer.style.display = 'inline-block';
         const volumeHeatmapBtn = document.createElement('button');
         volumeHeatmapBtn.id = 'volumeHeatmap';
-        volumeHeatmapBtn.className = 'tool-btn';
+        volumeHeatmapBtn.className = 'tool-btn dropdown-btn';
         volumeHeatmapBtn.textContent = 'Volume Heatmap';
-        topToolbar.appendChild(volumeHeatmapBtn);
+        volumeHeatmapBtn.title = 'Volume heatmap options';
+        volumeHeatmapContainer.appendChild(volumeHeatmapBtn);
+        // Create dropdown menu
+        const dropdown = document.createElement('div');
+        dropdown.className = 'dropdown-menu';
+        dropdown.style.position = 'absolute';
+        dropdown.style.top = '100%';
+        dropdown.style.left = '0';
+        dropdown.style.backgroundColor = '#1a1a1a';
+        dropdown.style.border = '1px solid #444';
+        dropdown.style.borderRadius = '4px';
+        dropdown.style.minWidth = '120px';
+        dropdown.style.zIndex = '1000';
+        dropdown.style.display = 'none';
+        dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+        // Dynamic option
+        const dynamicOption = document.createElement('div');
+        dynamicOption.className = 'dropdown-item';
+        dynamicOption.textContent = 'Dynamic';
+        dynamicOption.style.padding = '8px 12px';
+        dynamicOption.style.cursor = 'pointer';
+        dynamicOption.style.color = '#fff';
+        dynamicOption.style.fontSize = '12px';
+        dynamicOption.addEventListener('mouseenter', () => dynamicOption.style.backgroundColor = '#333');
+        dynamicOption.addEventListener('mouseleave', () => dynamicOption.style.backgroundColor = 'transparent');
+        dynamicOption.addEventListener('click', () => {
+            this.updateOptions({ volumeHeatmapDynamic: true, showVolumeHeatmap: true });
+            this.updateButtonText();
+            dropdown.style.display = 'none';
+        });
+        dropdown.appendChild(dynamicOption);
+        // Static option
+        const staticOption = document.createElement('div');
+        staticOption.className = 'dropdown-item';
+        staticOption.textContent = 'Static';
+        staticOption.style.padding = '8px 12px';
+        staticOption.style.cursor = 'pointer';
+        staticOption.style.color = '#fff';
+        staticOption.style.fontSize = '12px';
+        staticOption.addEventListener('mouseenter', () => staticOption.style.backgroundColor = '#333');
+        staticOption.addEventListener('mouseleave', () => staticOption.style.backgroundColor = 'transparent');
+        staticOption.addEventListener('click', () => {
+            this.updateOptions({ volumeHeatmapDynamic: false, showVolumeHeatmap: true });
+            this.updateButtonText();
+            dropdown.style.display = 'none';
+        });
+        dropdown.appendChild(staticOption);
+        // Off option
+        const offOption = document.createElement('div');
+        offOption.className = 'dropdown-item';
+        offOption.textContent = 'Off';
+        offOption.style.padding = '8px 12px';
+        offOption.style.cursor = 'pointer';
+        offOption.style.color = '#fff';
+        offOption.style.fontSize = '12px';
+        offOption.addEventListener('mouseenter', () => offOption.style.backgroundColor = '#333');
+        offOption.addEventListener('mouseleave', () => offOption.style.backgroundColor = 'transparent');
+        offOption.addEventListener('click', () => {
+            this.updateOptions({ showVolumeHeatmap: false });
+            this.updateButtonText();
+            dropdown.style.display = 'none';
+        });
+        dropdown.appendChild(offOption);
+        volumeHeatmapContainer.appendChild(dropdown);
+        topToolbar.appendChild(volumeHeatmapContainer);
         const measureBtn = document.createElement('button');
         measureBtn.id = 'measure';
         measureBtn.className = 'tool-btn';
@@ -1099,12 +1140,14 @@ class Chart {
         const toggleGridBtn = container.querySelector('#toggleGrid');
         const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint');
         const volumeHeatmapBtn = container.querySelector('#volumeHeatmap');
+        const volumeHeatmapDropdown = container.querySelector('.dropdown-menu');
         const measureBtn = container.querySelector('#measure');
         // Store references for later use
         this.resetZoomBtn = resetZoomBtn;
         this.toggleGridBtn = toggleGridBtn;
         this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
         this.volumeHeatmapBtn = volumeHeatmapBtn;
+        this.volumeHeatmapDropdown = volumeHeatmapDropdown;
         this.measureBtn = measureBtn;
     }
     /**
@@ -1137,7 +1180,7 @@ class Chart {
      * @param chartContainer The chart container element
      */
     initializeOptions(options, container, chartContainer) {
-        var _a, _b, _c, _d;
+        var _a, _b, _c, _d, _e;
         this.options = {
             width: options.width || container.clientWidth || 800,
             height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
@@ -1145,6 +1188,7 @@ class Chart {
             showBounds: (_b = options.showBounds) !== null && _b !== void 0 ? _b : false,
             showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
             showVolumeHeatmap: (_d = options.showVolumeHeatmap) !== null && _d !== void 0 ? _d : false,
+            volumeHeatmapDynamic: (_e = options.volumeHeatmapDynamic) !== null && _e !== void 0 ? _e : true,
             tickSize: options.tickSize || 10,
             initialZoomX: options.initialZoomX || 0.55,
             initialZoomY: options.initialZoomY || 0.55,
@@ -1156,6 +1200,7 @@ class Chart {
         this.showBounds = this.options.showBounds;
         this.showVolumeFootprint = this.options.showVolumeFootprint;
         this.showVolumeHeatmap = this.options.showVolumeHeatmap;
+        this.volumeHeatmapDynamic = this.options.volumeHeatmapDynamic;
         this.view.zoomX = this.options.initialZoomX;
         this.view.zoomY = this.options.initialZoomY;
     }
@@ -1170,7 +1215,7 @@ class Chart {
             onZoom: () => this.drawing.drawAll(),
             onMouseMove: () => this.drawing.drawAll()
         }, this.crosshair, this.scales);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
     }
     constructor(container, options = {}, events = {}) {
         this.data = [];
@@ -1182,6 +1227,7 @@ class Chart {
         this.showBounds = false;
         this.showVolumeFootprint = true;
         this.showVolumeHeatmap = false;
+        this.volumeHeatmapDynamic = true;
         this.crosshair = { x: -1, y: -1, visible: false };
         this.lastPrice = null;
         // Toolbar button references
@@ -1189,7 +1235,14 @@ class Chart {
         this.toggleGridBtn = null;
         this.toggleVolumeFootprintBtn = null;
         this.volumeHeatmapBtn = null;
+        this.volumeHeatmapDropdown = null;
         this.measureBtn = null;
+        // CVD state
+        this.showCVD = false;
+        this.cvdDynamic = true;
+        this.cvdValues = [];
+        this.cvdBaseline = 'global';
+        this.cvdNormalize = true;
         // Constants
         this.TICK = 10;
         this.BASE_CANDLE = 15;
@@ -1215,6 +1268,7 @@ class Chart {
         this.setupCanvas();
         this.bindEvents();
         this.bindToolbarEvents();
+        this.updateButtonText();
         this.layout();
     }
     setupCanvas() {
@@ -1269,22 +1323,36 @@ class Chart {
                 });
             });
         }
-        if (this.volumeHeatmapBtn) {
-            this.volumeHeatmapBtn.addEventListener('click', () => {
-                this.updateOptions({
-                    showVolumeHeatmap: !this.options.showVolumeHeatmap
-                });
+        if (this.volumeHeatmapBtn && this.volumeHeatmapDropdown) {
+            this.volumeHeatmapBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Toggle dropdown visibility
+                const isVisible = this.volumeHeatmapDropdown.style.display !== 'none';
+                this.hideAllDropdowns();
+                if (!isVisible) {
+                    this.volumeHeatmapDropdown.style.display = 'block';
+                }
+            });
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                var _a, _b;
+                if (!((_a = this.volumeHeatmapBtn) === null || _a === void 0 ? void 0 : _a.contains(e.target)) &&
+                    !((_b = this.volumeHeatmapDropdown) === null || _b === void 0 ? void 0 : _b.contains(e.target))) {
+                    this.volumeHeatmapDropdown.style.display = 'none';
+                }
             });
         }
         if (this.measureBtn) {
             this.measureBtn.addEventListener('click', () => {
                 var _a, _b;
-                const isActive = this.interactions.getMeasureRectangle() !== null;
+                const isActive = this.interactions.getMeasureMode();
                 if (isActive) {
+                    // Deactivate measure mode
                     this.interactions.setMeasureMode(false);
                     (_a = this.measureBtn) === null || _a === void 0 ? void 0 : _a.classList.remove('active');
                 }
                 else {
+                    // Activate measure mode
                     this.interactions.setMeasureMode(true);
                     (_b = this.measureBtn) === null || _b === void 0 ? void 0 : _b.classList.add('active');
                 }
@@ -1307,13 +1375,17 @@ class Chart {
         }
         // Recreate scales and drawing with new dimensions
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.setupCanvas();
         this.drawing.drawAll();
     }
     // Public API
     setData(data) {
         this.data = data;
+        // Calculate CVD values
+        console.log('setData: calling calculateCVD');
+        this.calculateCVD();
+        console.log('setData: CVD values calculated, length:', this.cvdValues.length);
         // Calculate lastPrice first, before creating Drawing instance
         if (data.length > 0) {
             const lastPrice = data[data.length - 1].close;
@@ -1321,7 +1393,7 @@ class Chart {
         }
         // Update scales with new data
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
         this.interactions);
         // Set initial view to show the end of the chart (latest data) and center the last price vertically
         if (data.length > 0) {
@@ -1339,12 +1411,15 @@ class Chart {
         this.drawing.drawAll();
     }
     updateOptions(options) {
+        var _a;
         const oldShowVolumeFootprint = this.showVolumeFootprint;
         Object.assign(this.options, options);
         this.showGrid = this.options.showGrid;
         this.showBounds = this.options.showBounds;
         this.showVolumeFootprint = this.options.showVolumeFootprint;
         this.showVolumeHeatmap = this.options.showVolumeHeatmap;
+        this.volumeHeatmapDynamic = (_a = this.options.volumeHeatmapDynamic) !== null && _a !== void 0 ? _a : this.volumeHeatmapDynamic;
+        console.log('updateOptions: volume heatmap options updated');
         // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
         if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
             const oldSpacing = oldShowVolumeFootprint ? 132 * this.view.zoomX : 16 * this.view.zoomX;
@@ -1354,7 +1429,7 @@ class Chart {
         }
         // Recreate Scales first, then Drawing
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
         this.layout();
     }
     resize(width, height) {
@@ -1365,6 +1440,123 @@ class Chart {
     destroy() {
         if (this.canvas.parentElement) {
             this.canvas.parentElement.removeChild(this.canvas);
+        }
+    }
+    calculateCVD() {
+        var _a, _b;
+        console.log('calculateCVD called, data length:', this.data.length);
+        if (this.data.length === 0) {
+            this.cvdValues = [];
+            return;
+        }
+        this.cvdValues = new Array(this.data.length);
+        let cumulative = 0;
+        // Calculate baseline index based on mode
+        let baselineIndex = 0;
+        if (this.cvdBaseline === 'session') {
+            // For session mode, find first candle of current session (simplified - using first candle)
+            baselineIndex = 0;
+        }
+        else if (this.cvdBaseline === 'visible') {
+            // For visible mode, use first visible candle
+            const vr = (_a = this.scales) === null || _a === void 0 ? void 0 : _a.getVisibleRange();
+            baselineIndex = vr ? vr.startIndex : 0;
+        }
+        // Calculate cumulative delta based on dynamic mode
+        console.log('calculateCVD: cvdDynamic =', this.cvdDynamic);
+        if (this.cvdDynamic) {
+            // Dynamic mode: calculate CVD starting from the visible range, but ensure continuity
+            const vr = (_b = this.scales) === null || _b === void 0 ? void 0 : _b.getVisibleRange();
+            console.log('calculateCVD: visible range =', vr);
+            if (vr) {
+                const startIndex = vr.startIndex;
+                const endIndex = vr.endIndex;
+                console.log('calculateCVD: calculating for range', startIndex, 'to', endIndex);
+                // Calculate CVD for the entire visible range, starting cumulative from 0 at startIndex
+                cumulative = 0; // Reset cumulative for visible range
+                for (let i = startIndex; i < endIndex; i++) {
+                    if (i < this.data.length) {
+                        const candle = this.data[i];
+                        const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                        cumulative += delta;
+                        this.cvdValues[i] = cumulative;
+                        console.log(`calculateCVD: i=${i}, delta=${delta}, cumulative=${cumulative}`);
+                    }
+                }
+                // Apply normalization if enabled (normalize to start at 0)
+                if (this.cvdNormalize) {
+                    const baselineValue = this.cvdValues[startIndex];
+                    console.log('calculateCVD: normalizing with baseline', baselineValue);
+                    for (let i = startIndex; i < endIndex; i++) {
+                        if (i < this.cvdValues.length && this.cvdValues[i] !== undefined) {
+                            this.cvdValues[i] -= baselineValue;
+                        }
+                    }
+                }
+            }
+        }
+        else {
+            // Static mode: calculate for all data
+            for (let i = 0; i < this.data.length; i++) {
+                const candle = this.data[i];
+                const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                cumulative += delta;
+                this.cvdValues[i] = cumulative;
+            }
+            // Apply normalization if enabled
+            if (this.cvdNormalize && baselineIndex < this.cvdValues.length) {
+                const baselineValue = this.cvdValues[baselineIndex];
+                for (let i = 0; i < this.cvdValues.length; i++) {
+                    this.cvdValues[i] -= baselineValue;
+                }
+            }
+        }
+    }
+    // Public method to add new candle data for streaming updates (O(1))
+    addCandle(candle) {
+        var _a;
+        this.data.push(candle);
+        // Calculate CVD for new candle (O(1) update)
+        const lastCVD = this.cvdValues.length > 0 ? this.cvdValues[this.cvdValues.length - 1] : 0;
+        const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+        const newCVD = lastCVD + delta;
+        // Apply normalization if needed
+        let normalizedCVD = newCVD;
+        if (this.cvdNormalize) {
+            let baselineValue = 0;
+            if (this.cvdBaseline === 'global') {
+                baselineValue = this.cvdValues.length > 0 ? this.cvdValues[0] : 0;
+            }
+            else if (this.cvdBaseline === 'session') {
+                baselineValue = this.cvdValues.length > 0 ? this.cvdValues[0] : 0; // Simplified
+            }
+            else if (this.cvdBaseline === 'visible') {
+                const vr = (_a = this.scales) === null || _a === void 0 ? void 0 : _a.getVisibleRange();
+                const baselineIndex = vr ? vr.startIndex : 0;
+                baselineValue = baselineIndex < this.cvdValues.length ? this.cvdValues[baselineIndex] : 0;
+            }
+            normalizedCVD = newCVD - baselineValue;
+        }
+        this.cvdValues.push(normalizedCVD);
+        // Update scales and redraw
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+        this.drawing.drawAll();
+    }
+    updateButtonText() {
+        if (this.volumeHeatmapBtn) {
+            if (this.options.showVolumeHeatmap) {
+                const mode = this.options.volumeHeatmapDynamic ? 'Dynamic' : 'Static';
+                this.volumeHeatmapBtn.textContent = `Volume Heatmap (${mode})`;
+            }
+            else {
+                this.volumeHeatmapBtn.textContent = 'Volume Heatmap';
+            }
+        }
+    }
+    hideAllDropdowns() {
+        if (this.volumeHeatmapDropdown) {
+            this.volumeHeatmapDropdown.style.display = 'none';
         }
     }
     // Getters for API access
