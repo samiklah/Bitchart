@@ -18,7 +18,7 @@
     "trading",
     "finance"
   ],
-  "author": "Your Name",
+  "author": "Sami Aldkheel",
   "license": "MIT",
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^15.0.0",
