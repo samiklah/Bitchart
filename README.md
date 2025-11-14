@@ -253,14 +253,6 @@ npm run dev      # Development with watch mode
 
 The build outputs UMD format for browser compatibility.
 
-## 🐛 Debugging
-
-Enable debug logging by modifying `chart.ts`:
-
-```typescript
-console.log('Chart state:', this.view);
-console.log('Data length:', this.data.length);
-```
 
 ## 🚀 Performance Tips
 
