@@ -107,6 +107,9 @@ class Scales {
      */
     constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS) {
         this.data = [];
+        // Cached ladderTop to prevent recalculation on every access
+        this.cachedLadderTop = 10000;
+        this.ladderTopDirty = true;
         this.data = data;
         this.margin = margin;
         this.view = view;
@@ -120,6 +123,10 @@ class Scales {
     /** Returns the height of the chart area in pixels (excluding margins). */
     chartHeight() {
         return this.canvasHeight - this.margin.top - this.margin.bottom;
+    }
+    /** Returns the margin configuration. */
+    getMargin() {
+        return this.margin;
     }
     /** Returns the current row height in pixels, adjusted for zoom. */
     rowHeightPx() {
@@ -219,9 +226,40 @@ class Scales {
         return this.rowIndexToPrice((screenY - this.margin.top) / this.rowHeightPx() + this.view.offsetRows);
     }
     get ladderTop() {
+        if (this.ladderTopDirty) {
+            this.cachedLadderTop = this.calculateLadderTop();
+            this.ladderTopDirty = false;
+        }
+        return this.cachedLadderTop;
+    }
+    calculateLadderTop() {
         if (this.data.length === 0)
             return 10000;
-        return Math.ceil(Math.max(...this.data.map(c => c.high)) / this.TICK) * this.TICK + 10 * this.TICK;
+        // Collect all footprint prices
+        const allPrices = new Set();
+        for (const candle of this.data) {
+            for (const level of candle.footprint) {
+                allPrices.add(level.price);
+            }
+            // Include OHLC
+            allPrices.add(candle.open);
+            allPrices.add(candle.high);
+            allPrices.add(candle.low);
+            allPrices.add(candle.close);
+        }
+        if (allPrices.size === 0) {
+            return Math.ceil(Math.max(...this.data.map(c => c.high)) / this.TICK) * this.TICK + 10 * this.TICK;
+        }
+        const prices = Array.from(allPrices).sort((a, b) => b - a);
+        const maxPrice = prices[0];
+        const minPrice = prices[prices.length - 1];
+        const range = maxPrice - minPrice;
+        // Add padding: minimum 2 ticks or 10% of range
+        const padding = Math.max(this.TICK * 2, range * 0.1);
+        return maxPrice + padding;
+    }
+    invalidateLadderTop() {
+        this.ladderTopDirty = true;
     }
 }
 
@@ -269,7 +307,8 @@ class Interactions {
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
         const chartRight = this.canvas.clientWidth - this.margin.right;
-        const yBottom = this.margin.top + 600 - this.margin.top - this.margin.bottom; // chartHeight
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const yBottom = canvasHeight - this.margin.bottom;
         const overPriceBar = mx > chartRight;
         const overTimeline = my > yBottom;
         const overChartBody = !overPriceBar && !overTimeline;
@@ -284,7 +323,8 @@ class Interactions {
             const factor = (e.deltaY < 0 ? 1.1 : 0.9);
             const next = Math.max(0.1, Math.min(8, prev * factor));
             this.view.zoomX = next;
-            this.view.zoomY *= (next / prev); // Also zoom the price axis
+            // Reduce price axis zoom sensitivity for smoother transitions
+            this.view.zoomY *= Math.pow(factor, 0.7);
             this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
             // Adjust offsetX to keep the same startIndex (prevent scrolling)
             this.view.offsetX *= (next / prev);
@@ -325,9 +365,9 @@ class Interactions {
             lastX = ev.clientX;
             lastY = ev.clientY;
             lastT = now;
-            // 1:1 mouse movement like the original volume_footprint_chart.html
+            // Use proper rowHeightPx() method instead of hardcoded 22
             this.view.offsetX += (this.PAN_INVERT.x ? -dx : dx);
-            this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / (22 * this.view.zoomY); // rowHeightPx()
+            this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / this.scales.rowHeightPx();
             (this.PAN_INVERT.x ? -dx : dx) / dt;
             (_b = (_a = this.events).onPan) === null || _b === void 0 ? void 0 : _b.call(_a, this.view.offsetX, this.view.offsetRows);
             this.clearMeasureRectangle();
@@ -444,6 +484,7 @@ class Interactions {
         const yBottom = canvasHeight - this.margin.bottom;
         const overChartBody = x >= this.margin.left && x <= chartRight &&
             y >= this.margin.top && y <= yBottom;
+        const wasVisible = this.crosshair.visible;
         if (overChartBody) {
             this.crosshair.x = x;
             this.crosshair.y = y;
@@ -452,8 +493,10 @@ class Interactions {
         else {
             this.crosshair.visible = false;
         }
-        // Trigger redraw
-        (_b = (_a = this.events).onMouseMove) === null || _b === void 0 ? void 0 : _b.call(_a, x, y, this.crosshair.visible);
+        // Only trigger redraw when crosshair state changes to avoid excessive redraws
+        if (this.crosshair.visible !== wasVisible || this.crosshair.visible) {
+            (_b = (_a = this.events).onMouseMove) === null || _b === void 0 ? void 0 : _b.call(_a, x, y, this.crosshair.visible);
+        }
     }
     handleMouseLeave() {
         var _a, _b;
@@ -488,10 +531,15 @@ function drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, sca
         totBuy += f.buy;
         totSell += f.sell;
         const isPOC = enableProfile && (r === pocIdx);
-        ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
-        ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
-        ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
-        ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+        // Only draw if the row is visible (within chart bounds)
+        const margin = scales.getMargin();
+        const chartBottom = margin.top + scales.chartHeight();
+        if (yTop >= margin.top && yBot <= chartBottom) {
+            ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
+            ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
+            ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
+            ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+        }
     }
     return { minRow, maxRow, totBuy, totSell };
 }
@@ -1018,6 +1066,42 @@ class Drawing {
  * Provides the primary API for creating and managing chart instances with modular components.
  */
 class Chart {
+    // Tick size detection
+    detectTickSize() {
+        if (this.data.length === 0)
+            return 10;
+        // Collect all unique price differences from footprint data
+        const priceDifferences = new Set();
+        for (const candle of this.data) {
+            if (candle.footprint && candle.footprint.length > 1) {
+                // Sort footprint prices
+                const prices = candle.footprint.map(f => f.price).sort((a, b) => a - b);
+                // Calculate differences between consecutive prices
+                for (let i = 1; i < prices.length; i++) {
+                    const diff = prices[i] - prices[i - 1];
+                    if (diff > 0) {
+                        priceDifferences.add(diff);
+                    }
+                }
+            }
+        }
+        // Find the most common smallest difference
+        if (priceDifferences.size === 0)
+            return 10;
+        const sortedDiffs = Array.from(priceDifferences).sort((a, b) => a - b);
+        const smallestDiff = sortedDiffs[0];
+        // For crypto data, ensure tick size is reasonable (at least 0.1 for most pairs)
+        // If detected tick is too small, round up to a reasonable value
+        if (smallestDiff < 0.1) {
+            // Round to nearest 0.1, 0.5, or 1.0
+            if (smallestDiff < 0.25)
+                return 0.1;
+            if (smallestDiff < 0.75)
+                return 0.5;
+            return 1.0;
+        }
+        return smallestDiff; // Return the smallest detected tick size
+    }
     createChartStructure(container) {
         // Check if toolbars already exist
         if (container.querySelector('.vfc-toolbar')) {
@@ -1262,7 +1346,7 @@ class Chart {
         this.initializeOptions(options, container, chartContainer);
         // Set events
         this.events = events;
-        // Initialize modules
+        // Initialize modules with default tick size (will be updated in setData)
         this.initializeModules();
         // Set up canvas and event handlers
         this.setupCanvas();
@@ -1382,6 +1466,16 @@ class Chart {
     // Public API
     setData(data) {
         this.data = data;
+        // Detect tick size from data if not explicitly provided
+        if (!this.options.tickSize && this.data.length > 0) {
+            const detectedTick = this.detectTickSize();
+            console.log('Detected tick size:', detectedTick);
+            this.TICK = detectedTick;
+        }
+        else if (this.options.tickSize) {
+            console.log('Using explicit tick size:', this.options.tickSize);
+            this.TICK = this.options.tickSize;
+        }
         // Calculate CVD values
         console.log('setData: calling calculateCVD');
         this.calculateCVD();
@@ -1393,6 +1487,13 @@ class Chart {
         }
         // Update scales with new data
         this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+        // Invalidate ladderTop cache when tick size changes
+        if (this.TICK !== this.options.tickSize) {
+            this.TICK = this.options.tickSize || this.TICK;
+            this.scales.invalidateLadderTop();
+        }
+        // Invalidate ladderTop cache when data changes
+        this.scales.invalidateLadderTop();
         this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
         this.interactions);
         // Set initial view to show the end of the chart (latest data) and center the last price vertically

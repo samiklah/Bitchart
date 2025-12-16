@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Volume Footprint Chart - Real Market Data</title>
+  <link rel="stylesheet" href="../src/styles.css">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #container {
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <!-- Toolbars and chart structure will be created automatically by the library -->
+  </div>
+
+  <script src="../dist/index.js"></script>
+  <script>
+    // =============================================================
+    // Volume Footprint Chart Example — Real Market Data (Hardcoded)
+    // =============================================================
+
+    const container = document.getElementById('container');
+
+    // Create chart using the VFC Chart class directly
+    const chart = new bitchart.VFC(container, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      showVolumeFootprint: true,
+      showVolumeHeatmap: false,
+      volumeHeatmapDynamic: true,
+      showGrid: true,
+      tickSize: 0.1  // Explicit tick size for BNB/USDT data
+    });
+
+    // Hardcoded real market data (BNB/USDT 1m candles)
+    const realMarketData = [
+      {
+        "time": "2025-10-22T09:47:00+00:00",
+        "open": 1060.76,
+        "high": 1061.02,
+        "low": 1060.76,
+        "close": 1060.97,
+        "footprint": [
+          {
+            "price": 1060.8,
+            "buy": 0.47900000000000004,
+            "sell": 0.0
+          },
+          {
+            "price": 1060.9,
+            "buy": 3.353,
+            "sell": 0.354
+          },
+          {
+            "price": 1061.0,
+            "buy": 7.295,
+            "sell": 2.792
+          }
+        ]
+      },
+      {
+        "time": "2025-10-22T09:48:00+00:00",
+        "open": 1060.97,
+        "high": 1060.97,
+        "low": 1060.24,
+        "close": 1060.25,
+        "footprint": [
+          {
+            "price": 1060.2,
+            "buy": 0.0,
+            "sell": 1.446
+          },
+          {
+            "price": 1060.3,
+            "buy": 24.14,
+            "sell": 3.076
+          },
+          {
+            "price": 1060.4,
+            "buy": 7.348,
+            "sell": 3.231
+          },
+          {
+            "price": 1060.5,
+            "buy": 5.486,
+            "sell": 5.97
+          },
+          {
+            "price": 1060.6,
+            "buy": 0.0,
+            "sell": 1.006
+          },
+          {
+            "price": 1060.7,
+            "buy": 0.0,
+            "sell": 0.6809999999999999
+          },
+          {
+            "price": 1060.8,
+            "buy": 0.116,
+            "sell": 0.211
+          },
+          {
+            "price": 1060.9,
+            "buy": 0.0,
+            "sell": 1.148
+          },
+          {
+            "price": 1061.0,
+            "buy": 1.175,
+            "sell": 1.474
+          }
+        ]
+      }
+    ];
+
+    // Load the hardcoded data
+    console.log('Loading hardcoded real market data');
+    console.log('Loaded', realMarketData.length, 'candles from hardcoded data');
+    console.log('Sample candle:', JSON.stringify(realMarketData[0], null, 2));
+
+    // Debug: Check tick size detection
+    console.log('About to call setData...');
+
+    chart.setData(realMarketData);
+
+    console.log('setData completed');
+
+  </script>
+</body>
+</html>

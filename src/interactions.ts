@@ -62,7 +62,8 @@ export class Interactions {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const chartRight = this.canvas.clientWidth - this.margin.right;
-    const yBottom = this.margin.top + 600 - this.margin.top - this.margin.bottom; // chartHeight
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const yBottom = canvasHeight - this.margin.bottom;
 
     const overPriceBar = mx > chartRight;
     const overTimeline = my > yBottom;
@@ -78,7 +79,8 @@ export class Interactions {
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
       const next = Math.max(0.1, Math.min(8, prev * factor));
       this.view.zoomX = next;
-      this.view.zoomY *= (next / prev); // Also zoom the price axis
+      // Reduce price axis zoom sensitivity for smoother transitions
+      this.view.zoomY *= Math.pow(factor, 0.7);
       this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
       // Adjust offsetX to keep the same startIndex (prevent scrolling)
       this.view.offsetX *= (next / prev);
@@ -123,9 +125,9 @@ export class Interactions {
       lastY = ev.clientY;
       lastT = now;
 
-      // 1:1 mouse movement like the original volume_footprint_chart.html
+      // Use proper rowHeightPx() method instead of hardcoded 22
       this.view.offsetX += (this.PAN_INVERT.x ? -dx : dx);
-      this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / (22 * this.view.zoomY); // rowHeightPx()
+      this.view.offsetRows += (this.PAN_INVERT.y ? -dy : dy) / this.scales.rowHeightPx();
       velX = (this.PAN_INVERT.x ? -dx : dx) / dt;
       this.events.onPan?.(this.view.offsetX, this.view.offsetRows);
       this.clearMeasureRectangle();
@@ -265,8 +267,9 @@ export class Interactions {
     const yBottom = canvasHeight - this.margin.bottom;
 
     const overChartBody = x >= this.margin.left && x <= chartRight &&
-                         y >= this.margin.top && y <= yBottom;
+                          y >= this.margin.top && y <= yBottom;
 
+    const wasVisible = this.crosshair.visible;
     if (overChartBody) {
       this.crosshair.x = x;
       this.crosshair.y = y;
@@ -275,8 +278,10 @@ export class Interactions {
       this.crosshair.visible = false;
     }
 
-    // Trigger redraw
-    this.events.onMouseMove?.(x, y, this.crosshair.visible);
+    // Only trigger redraw when crosshair state changes to avoid excessive redraws
+    if (this.crosshair.visible !== wasVisible || this.crosshair.visible) {
+      this.events.onMouseMove?.(x, y, this.crosshair.visible);
+    }
   }
 
   private handleMouseLeave(): void {

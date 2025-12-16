@@ -42,7 +42,47 @@ export class Chart {
    private cvdNormalize = true;
 
    // Constants
-   private readonly TICK = 10;
+   private TICK: number = 10;
+
+   // Tick size detection
+   private detectTickSize(): number {
+     if (this.data.length === 0) return 10;
+
+     // Collect all unique price differences from footprint data
+     const priceDifferences = new Set<number>();
+
+     for (const candle of this.data) {
+       if (candle.footprint && candle.footprint.length > 1) {
+         // Sort footprint prices
+         const prices = candle.footprint.map(f => f.price).sort((a, b) => a - b);
+
+         // Calculate differences between consecutive prices
+         for (let i = 1; i < prices.length; i++) {
+           const diff = prices[i] - prices[i - 1];
+           if (diff > 0) {
+             priceDifferences.add(diff);
+           }
+         }
+       }
+     }
+
+     // Find the most common smallest difference
+     if (priceDifferences.size === 0) return 10;
+ 
+     const sortedDiffs = Array.from(priceDifferences).sort((a, b) => a - b);
+     const smallestDiff = sortedDiffs[0];
+ 
+     // For crypto data, ensure tick size is reasonable (at least 0.1 for most pairs)
+     // If detected tick is too small, round up to a reasonable value
+     if (smallestDiff < 0.1) {
+       // Round to nearest 0.1, 0.5, or 1.0
+       if (smallestDiff < 0.25) return 0.1;
+       if (smallestDiff < 0.75) return 0.5;
+       return 1.0;
+     }
+ 
+     return smallestDiff; // Return the smallest detected tick size
+   }
    private readonly BASE_CANDLE = 15;
    private readonly BASE_BOX = 55;
    private readonly BASE_IMBALANCE = 2;
@@ -329,7 +369,7 @@ export class Chart {
     // Set events
     this.events = events;
 
-    // Initialize modules
+    // Initialize modules with default tick size (will be updated in setData)
     this.initializeModules();
 
     // Set up canvas and event handlers
@@ -489,6 +529,16 @@ export class Chart {
   public setData(data: CandleData[]) {
     this.data = data;
 
+    // Detect tick size from data if not explicitly provided
+    if (!this.options.tickSize && this.data.length > 0) {
+      const detectedTick = this.detectTickSize();
+      console.log('Detected tick size:', detectedTick);
+      this.TICK = detectedTick;
+    } else if (this.options.tickSize) {
+      console.log('Using explicit tick size:', this.options.tickSize);
+      this.TICK = this.options.tickSize;
+    }
+
     // Calculate CVD values
     console.log('setData: calling calculateCVD');
     this.calculateCVD();
@@ -512,6 +562,15 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS
     );
+
+    // Invalidate ladderTop cache when tick size changes
+    if (this.TICK !== this.options.tickSize) {
+      this.TICK = this.options.tickSize || this.TICK;
+      this.scales.invalidateLadderTop();
+    }
+
+    // Invalidate ladderTop cache when data changes
+    this.scales.invalidateLadderTop();
 
     this.drawing = new Drawing(
       this.ctx,

@@ -29,7 +29,8 @@ export declare class Chart {
     private cvdValues;
     private cvdBaseline;
     private cvdNormalize;
-    private readonly TICK;
+    private TICK;
+    private detectTickSize;
     private readonly BASE_CANDLE;
     private readonly BASE_BOX;
     private readonly BASE_IMBALANCE;

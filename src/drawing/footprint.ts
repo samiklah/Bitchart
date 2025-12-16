@@ -40,10 +40,15 @@ export function drawFootprintBoxes(
     totSell += f.sell;
 
     const isPOC = enableProfile && (r === pocIdx);
-    ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
-    ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
-    ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
-    ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+    // Only draw if the row is visible (within chart bounds)
+    const margin = scales.getMargin();
+    const chartBottom = margin.top + scales.chartHeight();
+    if (yTop >= margin.top && yBot <= chartBottom) {
+      ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
+      ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
+      ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
+      ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+    }
   }
 
   return { minRow, maxRow, totBuy, totSell };

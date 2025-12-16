@@ -21,6 +21,10 @@ export class Scales {
   private baseRowPx: number;
   private TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number };
 
+  // Cached ladderTop to prevent recalculation on every access
+  private cachedLadderTop: number = 10000;
+  private ladderTopDirty: boolean = true;
+
   /**
    * Creates a Scales instance for coordinate transformations.
    * @param data Array of candlestick data
@@ -58,6 +62,11 @@ export class Scales {
   /** Returns the height of the chart area in pixels (excluding margins). */
   chartHeight(): number {
     return this.canvasHeight - this.margin.top - this.margin.bottom;
+  }
+
+  /** Returns the margin configuration. */
+  getMargin(): { top: number; bottom: number; left: number; right: number } {
+    return this.margin;
   }
 
   /** Returns the current row height in pixels, adjusted for zoom. */
@@ -183,7 +192,44 @@ export class Scales {
   }
 
   private get ladderTop(): number {
+    if (this.ladderTopDirty) {
+      this.cachedLadderTop = this.calculateLadderTop();
+      this.ladderTopDirty = false;
+    }
+    return this.cachedLadderTop;
+  }
+
+  private calculateLadderTop(): number {
     if (this.data.length === 0) return 10000;
-    return Math.ceil(Math.max(...this.data.map(c => c.high)) / this.TICK) * this.TICK + 10 * this.TICK;
+
+    // Collect all footprint prices
+    const allPrices = new Set<number>();
+    for (const candle of this.data) {
+      for (const level of candle.footprint) {
+        allPrices.add(level.price);
+      }
+      // Include OHLC
+      allPrices.add(candle.open);
+      allPrices.add(candle.high);
+      allPrices.add(candle.low);
+      allPrices.add(candle.close);
+    }
+
+    if (allPrices.size === 0) {
+      return Math.ceil(Math.max(...this.data.map(c => c.high)) / this.TICK) * this.TICK + 10 * this.TICK;
+    }
+
+    const prices = Array.from(allPrices).sort((a, b) => b - a);
+    const maxPrice = prices[0];
+    const minPrice = prices[prices.length - 1];
+    const range = maxPrice - minPrice;
+
+    // Add padding: minimum 2 ticks or 10% of range
+    const padding = Math.max(this.TICK * 2, range * 0.1);
+    return maxPrice + padding;
+  }
+
+  public invalidateLadderTop(): void {
+    this.ladderTopDirty = true;
   }
 }

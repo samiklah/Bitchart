@@ -17,6 +17,8 @@ export declare class Scales {
     private TICK;
     private baseRowPx;
     private TEXT_VIS;
+    private cachedLadderTop;
+    private ladderTopDirty;
     /**
      * Creates a Scales instance for coordinate transformations.
      * @param data Array of candlestick data
@@ -46,6 +48,13 @@ export declare class Scales {
     });
     /** Returns the height of the chart area in pixels (excluding margins). */
     chartHeight(): number;
+    /** Returns the margin configuration. */
+    getMargin(): {
+        top: number;
+        bottom: number;
+        left: number;
+        right: number;
+    };
     /** Returns the current row height in pixels, adjusted for zoom. */
     rowHeightPx(): number;
     /** Returns the scaled spacing between candles, depending on volume footprint mode. */
@@ -73,4 +82,6 @@ export declare class Scales {
     screenXToExactDataIndex(screenX: number): number;
     screenYToPrice(screenY: number): number;
     private get ladderTop();
+    private calculateLadderTop;
+    invalidateLadderTop(): void;
 }
