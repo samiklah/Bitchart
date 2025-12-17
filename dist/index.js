@@ -110,8 +110,10 @@
          * @param TICK Price tick size
          * @param baseRowPx Base row height in pixels
          * @param TEXT_VIS Text visibility thresholds
+         * @param showCVD Whether CVD indicator is shown
+         * @param cvdHeightRatio Ratio of total height used for CVD
          */
-        constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS) {
+        constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS, showCVD = false, cvdHeightRatio = 0.2) {
             this.data = [];
             // Cached ladderTop to prevent recalculation on every access
             this.cachedLadderTop = 10000;
@@ -125,10 +127,38 @@
             this.TICK = TICK;
             this.baseRowPx = baseRowPx;
             this.TEXT_VIS = TEXT_VIS;
+            this.showCVD = showCVD;
+            this.cvdHeightRatio = cvdHeightRatio;
         }
-        /** Returns the height of the chart area in pixels (excluding margins). */
+        /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
         chartHeight() {
-            return this.canvasHeight - this.margin.top - this.margin.bottom;
+            const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+            if (!this.showCVD) {
+                return totalHeight;
+            }
+            // Reserve specific ratio for CVD, plus some gap
+            return totalHeight * (1 - this.cvdHeightRatio) - 2; // 2px gap
+        }
+        /** Returns the height of the CVD pane. */
+        cvdHeight() {
+            if (!this.showCVD)
+                return 0;
+            const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+            return totalHeight * this.cvdHeightRatio;
+        }
+        /** Returns the Y coordinate where the CVD pane starts. */
+        cvdOriginY() {
+            return this.margin.top + this.chartHeight() + 2; // + 2px gap
+        }
+        /** Maps a CVD value to a Y coordinate within the CVD pane. */
+        cvdToY(value, min, max) {
+            if (min === max)
+                return this.cvdOriginY() + this.cvdHeight() / 2;
+            const h = this.cvdHeight();
+            const range = max - min;
+            const ratio = (value - min) / range;
+            // Invert Y because canvas Y increases downwards
+            return this.cvdOriginY() + h - ratio * h;
         }
         /** Returns the margin configuration. */
         getMargin() {
@@ -935,7 +965,11 @@
      * Responsible for drawing grid, chart elements, scales, crosshair, and measurements.
      */
     class Drawing {
-        constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions) {
+        updateCVD(values) {
+            this.cvdValues = values;
+        }
+        constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions, cvdValues = []) {
+            this.cvdValues = [];
             this.ctx = ctx;
             this.data = data;
             this.margin = margin;
@@ -950,6 +984,7 @@
             this.crosshair = crosshair;
             this.lastPrice = lastPrice;
             this.interactions = interactions;
+            this.cvdValues = cvdValues;
         }
         drawAll() {
             const width = this.ctx.canvas.width / window.devicePixelRatio;
@@ -960,6 +995,8 @@
             if (this.showVolumeHeatmap)
                 this.drawVolumeHeatmap();
             this.drawChart();
+            if (this.scales.cvdHeight() > 0)
+                this.drawCVD();
             drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
             this.drawScales(width, height);
             drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
@@ -1017,15 +1054,109 @@
             }
             this.ctx.restore();
         }
+        drawCVD() {
+            const h = this.scales.cvdHeight();
+            if (h <= 0)
+                return;
+            const vr = this.scales.getVisibleRange();
+            if (vr.startIndex >= this.cvdValues.length)
+                return;
+            // Determine min/max for CURRENT VIEW
+            let min = Infinity;
+            let max = -Infinity;
+            for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.cvdValues.length); i++) {
+                const v = this.cvdValues[i];
+                if (v < min)
+                    min = v;
+                if (v > max)
+                    max = v;
+            }
+            if (min === Infinity)
+                return;
+            const range = max - min;
+            if (range === 0) {
+                min -= 1;
+                max += 1;
+            }
+            else {
+                const pad = range * 0.1;
+                min -= pad;
+                max += pad;
+            }
+            const ctx = this.ctx;
+            const originY = this.scales.cvdOriginY();
+            const width = this.ctx.canvas.width / window.devicePixelRatio;
+            // Draw background
+            ctx.save();
+            ctx.fillStyle = this.theme.background || '#000';
+            ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            // Clip
+            ctx.beginPath();
+            ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            ctx.clip();
+            // Draw Zero line
+            if (min < 0 && max > 0) {
+                const yZero = this.scales.cvdToY(0, min, max);
+                ctx.strokeStyle = '#333';
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(this.margin.left, yZero);
+                ctx.lineTo(width - this.margin.right, yZero);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            // Draw CVD Line
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let first = true;
+            for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.cvdValues.length); i++) {
+                const x = this.scales.indexToX(i, vr.startIndex);
+                const y = this.scales.cvdToY(this.cvdValues[i], min, max);
+                if (first) {
+                    ctx.moveTo(x, y);
+                    first = false;
+                }
+                else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+            // Draw CVD Y-Axis Labels Area
+            const right = width - this.margin.right;
+            ctx.save();
+            ctx.fillStyle = this.theme.scaleBackground || '#111';
+            ctx.fillRect(right, originY, this.margin.right, h);
+            ctx.strokeStyle = this.theme.scaleBorder || '#444';
+            ctx.strokeRect(right + 0.5, originY, 0.5, h);
+            // Labels
+            ctx.fillStyle = this.theme.textColor || '#aaa';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.font = '10px system-ui';
+            // Max
+            ctx.fillText(this.scales.formatK(Math.round(max)), right + 5, originY + 12);
+            // Min
+            ctx.fillText(this.scales.formatK(Math.round(min)), right + 5, originY + h - 12);
+            // Zero
+            if (min < 0 && max > 0) {
+                const yZero = this.scales.cvdToY(0, min, max);
+                if (yZero > originY + 20 && yZero < originY + h - 20) {
+                    ctx.fillText("0", right + 5, yZero);
+                }
+            }
+            ctx.restore();
+        }
         drawScales(width, height) {
             // Timeline position (fixed at bottom, CVD is drawn separately above it)
             const timelineY = height - this.margin.bottom;
             // Draw price bar (unchanged)
             const right = width - this.margin.right;
             this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-            this.ctx.fillRect(right, 0, this.margin.right, height);
+            this.ctx.fillRect(right, 0, this.margin.right, this.scales.chartHeight()); // Only fill price chart height
             this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-            this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, height - this.margin.top - this.margin.bottom);
+            this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, this.scales.chartHeight());
             // Price labels
             this.ctx.fillStyle = this.theme.textColor || '#aaa';
             this.ctx.font = '12px system-ui';
@@ -1270,7 +1401,7 @@
          * @param chartContainer The chart container element
          */
         initializeOptions(options, container, chartContainer) {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f;
             this.options = {
                 width: options.width || container.clientWidth || 800,
                 height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
@@ -1279,6 +1410,9 @@
                 showVolumeFootprint: (_c = options.showVolumeFootprint) !== null && _c !== void 0 ? _c : true,
                 showVolumeHeatmap: (_d = options.showVolumeHeatmap) !== null && _d !== void 0 ? _d : false,
                 volumeHeatmapDynamic: (_e = options.volumeHeatmapDynamic) !== null && _e !== void 0 ? _e : true,
+                showCVD: (_f = options.showCVD) !== null && _f !== void 0 ? _f : false,
+                cvdHeightRatio: options.cvdHeightRatio || 0.2,
+                cvdType: options.cvdType || 'ticker',
                 tickSize: options.tickSize || 10,
                 initialZoomX: options.initialZoomX || 0.55,
                 initialZoomY: options.initialZoomY || 0.55,
@@ -1290,7 +1424,10 @@
             this.showBounds = this.options.showBounds;
             this.showVolumeFootprint = this.options.showVolumeFootprint;
             this.showVolumeHeatmap = this.options.showVolumeHeatmap;
+            this.showVolumeHeatmap = this.options.showVolumeHeatmap;
             this.volumeHeatmapDynamic = this.options.volumeHeatmapDynamic;
+            this.showCVD = this.options.showCVD;
+            this.cvdType = this.options.cvdType;
             this.view.zoomX = this.options.initialZoomX;
             this.view.zoomY = this.options.initialZoomY;
         }
@@ -1298,14 +1435,23 @@
          * Initializes the chart modules (Scales, Interactions, Drawing).
          */
         initializeModules() {
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+            var _a;
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
             this.interactions = new Interactions(this.canvas, this.margin, this.view, {
                 ...this.events,
-                onPan: () => this.drawing.drawAll(),
-                onZoom: () => this.drawing.drawAll(),
+                onPan: () => {
+                    if (this.cvdDynamic && this.showCVD)
+                        this.calculateCVD();
+                    this.drawing.drawAll();
+                },
+                onZoom: () => {
+                    if (this.cvdDynamic && this.showCVD)
+                        this.calculateCVD();
+                    this.drawing.drawAll();
+                },
                 onMouseMove: () => this.drawing.drawAll()
             }, this.crosshair, this.scales);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
         }
         constructor(container, options = {}, events = {}) {
             this.data = [];
@@ -1320,6 +1466,7 @@
             this.volumeHeatmapDynamic = true;
             this.crosshair = { x: -1, y: -1, visible: false };
             this.lastPrice = null;
+            this.cvdType = 'ticker';
             // Toolbar button references
             this.resetZoomBtn = null;
             this.toggleGridBtn = null;
@@ -1458,19 +1605,21 @@
             this.interactions.handlePointerDown(e);
         }
         layout() {
+            var _a;
             const container = this.canvas.parentElement;
             if (container) {
                 this.options.width = container.clientWidth || this.options.width;
                 this.options.height = container.clientHeight || this.options.height;
             }
             // Recreate scales and drawing with new dimensions
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
             this.setupCanvas();
             this.drawing.drawAll();
         }
         // Public API
         setData(data) {
+            var _a;
             this.data = data;
             // Detect tick size from data if not explicitly provided
             if (!this.options.tickSize && this.data.length > 0) {
@@ -1482,17 +1631,11 @@
                 console.log('Using explicit tick size:', this.options.tickSize);
                 this.TICK = this.options.tickSize;
             }
-            // Calculate CVD values
-            console.log('setData: calling calculateCVD');
-            this.calculateCVD();
-            console.log('setData: CVD values calculated, length:', this.cvdValues.length);
-            // Calculate lastPrice first, before creating Drawing instance
             if (data.length > 0) {
-                const lastPrice = data[data.length - 1].close;
-                this.lastPrice = lastPrice;
+                this.lastPrice = data[data.length - 1].close;
             }
             // Update scales with new data
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
             // Invalidate ladderTop cache when tick size changes
             if (this.TICK !== this.options.tickSize) {
                 this.TICK = this.options.tickSize || this.TICK;
@@ -1500,8 +1643,6 @@
             }
             // Invalidate ladderTop cache when data changes
             this.scales.invalidateLadderTop();
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, // Now has the correct value
-            this.interactions);
             // Set initial view to show the end of the chart (latest data) and center the last price vertically
             if (data.length > 0) {
                 const s = this.scales.scaledSpacing();
@@ -1515,17 +1656,36 @@
                 const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
                 this.view.offsetRows = centerRow - priceRow;
             }
+            // Calculate CVD values AFTER scales and view are set
+            console.log('setData: calling calculateCVD');
+            this.calculateCVD();
+            console.log('setData: CVD values calculated, length:', this.cvdValues.length);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
             this.drawing.drawAll();
         }
         updateOptions(options) {
-            var _a;
+            var _a, _b, _c, _d;
             const oldShowVolumeFootprint = this.showVolumeFootprint;
+            const oldCvdType = this.cvdType;
             Object.assign(this.options, options);
             this.showGrid = this.options.showGrid;
             this.showBounds = this.options.showBounds;
             this.showVolumeFootprint = this.options.showVolumeFootprint;
             this.showVolumeHeatmap = this.options.showVolumeHeatmap;
+            this.showVolumeHeatmap = this.options.showVolumeHeatmap;
             this.volumeHeatmapDynamic = (_a = this.options.volumeHeatmapDynamic) !== null && _a !== void 0 ? _a : this.volumeHeatmapDynamic;
+            this.showCVD = (_b = this.options.showCVD) !== null && _b !== void 0 ? _b : this.showCVD;
+            this.cvdType = (_c = this.options.cvdType) !== null && _c !== void 0 ? _c : 'ticker';
+            // const oldCvdDynamic = this.cvdDynamic; // Wait, options doesn't have cvdDynamic directly exposed in interface? 
+            // Types interface says: volumeHeatmapDynamic... wait, VFCOptions doesn't have cvdDynamic?
+            // Let's check src/types.ts
+            // I recall adding showCVD, cvdHeightRatio, cvdType.
+            // I did NOT add cvdDynamic to VFCOptions.
+            // But chart.ts has private cvdDynamic = true;
+            // For now, let's just focus on cvdType.
+            if (this.cvdType !== oldCvdType) {
+                this.calculateCVD();
+            }
             console.log('updateOptions: volume heatmap options updated');
             // If showVolumeFootprint changed, adjust view offsetX to maintain visible range
             if (oldShowVolumeFootprint !== this.showVolumeFootprint && this.data.length > 0) {
@@ -1535,8 +1695,12 @@
                 this.view.offsetX = startIndex * newSpacing;
             }
             // Recreate Scales first, then Drawing
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_d = this.options.cvdHeightRatio) !== null && _d !== void 0 ? _d : 0.2);
+            // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
+            if (this.showCVD) {
+                this.calculateCVD();
+            }
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
             this.layout();
         }
         resize(width, height) {
@@ -1569,31 +1733,38 @@
                 const vr = (_a = this.scales) === null || _a === void 0 ? void 0 : _a.getVisibleRange();
                 baselineIndex = vr ? vr.startIndex : 0;
             }
-            // Calculate cumulative delta based on dynamic mode
             console.log('calculateCVD: cvdDynamic =', this.cvdDynamic);
             if (this.cvdDynamic) {
-                // Dynamic mode: calculate CVD starting from the visible range, but ensure continuity
+                // Dynamic mode: calculate CVD starting from the visible range
                 const vr = (_b = this.scales) === null || _b === void 0 ? void 0 : _b.getVisibleRange();
-                console.log('calculateCVD: visible range =', vr);
                 if (vr) {
                     const startIndex = vr.startIndex;
                     const endIndex = vr.endIndex;
-                    console.log('calculateCVD: calculating for range', startIndex, 'to', endIndex);
-                    // Calculate CVD for the entire visible range, starting cumulative from 0 at startIndex
-                    cumulative = 0; // Reset cumulative for visible range
+                    cumulative = 0;
                     for (let i = startIndex; i < endIndex; i++) {
                         if (i < this.data.length) {
                             const candle = this.data[i];
-                            const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                            let delta = 0;
+                            if (this.cvdType === 'ticker') {
+                                const volume = candle.footprint.reduce((sum, level) => sum + level.buy + level.sell, 0);
+                                const sign = Math.sign(candle.close - candle.open);
+                                if (candle.close === candle.open) {
+                                    delta = 0;
+                                }
+                                else {
+                                    delta = volume * sign;
+                                }
+                            }
+                            else {
+                                delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                            }
                             cumulative += delta;
                             this.cvdValues[i] = cumulative;
-                            console.log(`calculateCVD: i=${i}, delta=${delta}, cumulative=${cumulative}`);
                         }
                     }
-                    // Apply normalization if enabled (normalize to start at 0)
+                    // Apply normalization
                     if (this.cvdNormalize) {
                         const baselineValue = this.cvdValues[startIndex];
-                        console.log('calculateCVD: normalizing with baseline', baselineValue);
                         for (let i = startIndex; i < endIndex; i++) {
                             if (i < this.cvdValues.length && this.cvdValues[i] !== undefined) {
                                 this.cvdValues[i] -= baselineValue;
@@ -1603,30 +1774,61 @@
                 }
             }
             else {
-                // Static mode: calculate for all data
+                // Static mode
                 for (let i = 0; i < this.data.length; i++) {
                     const candle = this.data[i];
-                    const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                    let delta = 0;
+                    if (this.cvdType === 'ticker') {
+                        const volume = candle.footprint.reduce((sum, level) => sum + level.buy + level.sell, 0);
+                        const sign = Math.sign(candle.close - candle.open);
+                        if (candle.close === candle.open) {
+                            delta = 0;
+                        }
+                        else {
+                            delta = volume * sign;
+                        }
+                    }
+                    else {
+                        delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+                    }
                     cumulative += delta;
                     this.cvdValues[i] = cumulative;
                 }
-                // Apply normalization if enabled
-                if (this.cvdNormalize && baselineIndex < this.cvdValues.length) {
+                // Apply normalization
+                if (this.cvdNormalize && baselineIndex < this.cvdValues.length && baselineIndex >= 0) {
                     const baselineValue = this.cvdValues[baselineIndex];
                     for (let i = 0; i < this.cvdValues.length; i++) {
                         this.cvdValues[i] -= baselineValue;
                     }
                 }
             }
+            // Ensure Drawing module has the latest data
+            if (this.drawing) {
+                this.drawing.updateCVD(this.cvdValues);
+            }
         }
         // Public method to add new candle data for streaming updates (O(1))
         addCandle(candle) {
-            var _a;
+            var _a, _b;
             this.data.push(candle);
             // Calculate CVD for new candle (O(1) update)
             const lastCVD = this.cvdValues.length > 0 ? this.cvdValues[this.cvdValues.length - 1] : 0;
-            const delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
-            const newCVD = lastCVD + delta;
+            // Calculate new candle delta
+            let delta = 0;
+            if (this.cvdType === 'ticker') {
+                const volume = candle.footprint.reduce((sum, level) => sum + level.buy + level.sell, 0);
+                const sign = Math.sign(candle.close - candle.open);
+                if (candle.close === candle.open) {
+                    delta = 0;
+                }
+                else {
+                    delta = volume * sign;
+                }
+            }
+            else {
+                delta = candle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+            }
+            const newCVD = (lastCVD || 0) + delta;
             // Apply normalization if needed
             let normalizedCVD = newCVD;
             if (this.cvdNormalize) {
@@ -1634,20 +1836,17 @@
                 if (this.cvdBaseline === 'global') {
                     baselineValue = this.cvdValues.length > 0 ? this.cvdValues[0] : 0;
                 }
-                else if (this.cvdBaseline === 'session') {
-                    baselineValue = this.cvdValues.length > 0 ? this.cvdValues[0] : 0; // Simplified
-                }
                 else if (this.cvdBaseline === 'visible') {
                     const vr = (_a = this.scales) === null || _a === void 0 ? void 0 : _a.getVisibleRange();
                     const baselineIndex = vr ? vr.startIndex : 0;
                     baselineValue = baselineIndex < this.cvdValues.length ? this.cvdValues[baselineIndex] : 0;
                 }
-                normalizedCVD = newCVD - baselineValue;
+                normalizedCVD = newCVD - (baselineValue || 0);
             }
             this.cvdValues.push(normalizedCVD);
             // Update scales and redraw
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_b = this.options.cvdHeightRatio) !== null && _b !== void 0 ? _b : 0.2);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
             this.drawing.drawAll();
         }
         updateButtonText() {

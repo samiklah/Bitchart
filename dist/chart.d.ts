@@ -18,6 +18,7 @@ export declare class Chart {
     private volumeHeatmapDynamic;
     private crosshair;
     private lastPrice;
+    private cvdType;
     private resetZoomBtn;
     private toggleGridBtn;
     private toggleVolumeFootprintBtn;

@@ -17,6 +17,8 @@ export declare class Scales {
     private TICK;
     private baseRowPx;
     private TEXT_VIS;
+    private showCVD;
+    private cvdHeightRatio;
     private cachedLadderTop;
     private ladderTopDirty;
     /**
@@ -30,6 +32,8 @@ export declare class Scales {
      * @param TICK Price tick size
      * @param baseRowPx Base row height in pixels
      * @param TEXT_VIS Text visibility thresholds
+     * @param showCVD Whether CVD indicator is shown
+     * @param cvdHeightRatio Ratio of total height used for CVD
      */
     constructor(data: CandleData[], margin: {
         top: number;
@@ -45,9 +49,15 @@ export declare class Scales {
         minZoomX: number;
         minRowPx: number;
         minBoxPx: number;
-    });
-    /** Returns the height of the chart area in pixels (excluding margins). */
+    }, showCVD?: boolean, cvdHeightRatio?: number);
+    /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
     chartHeight(): number;
+    /** Returns the height of the CVD pane. */
+    cvdHeight(): number;
+    /** Returns the Y coordinate where the CVD pane starts. */
+    cvdOriginY(): number;
+    /** Maps a CVD value to a Y coordinate within the CVD pane. */
+    cvdToY(value: number, min: number, max: number): number;
     /** Returns the margin configuration. */
     getMargin(): {
         top: number;

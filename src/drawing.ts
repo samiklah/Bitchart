@@ -25,7 +25,12 @@ export class Drawing {
   private theme: VFCTheme;
   private crosshair: { x: number; y: number; visible: boolean };
   private lastPrice: number | null;
-  private interactions: any; // Reference to Interactions class to get dynamic measure rectangle
+  private interactions: any;
+  private cvdValues: number[] = [];
+
+  public updateCVD(values: number[]) {
+    this.cvdValues = values;
+  }
 
   constructor(
     ctx: CanvasRenderingContext2D,
@@ -41,7 +46,8 @@ export class Drawing {
     theme: VFCTheme,
     crosshair: { x: number; y: number; visible: boolean },
     lastPrice: number | null,
-    interactions: any
+    interactions: any,
+    cvdValues: number[] = []
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -57,6 +63,7 @@ export class Drawing {
     this.crosshair = crosshair;
     this.lastPrice = lastPrice;
     this.interactions = interactions;
+    this.cvdValues = cvdValues;
   }
 
   drawAll(): void {
@@ -66,6 +73,7 @@ export class Drawing {
     if (this.showGrid) drawGrid(this.ctx, width, this.margin, this.scales, this.theme);
     if (this.showVolumeHeatmap) this.drawVolumeHeatmap();
     this.drawChart();
+    if (this.scales.cvdHeight() > 0) this.drawCVD();
     drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
     this.drawScales(width, height);
     drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
@@ -139,6 +147,107 @@ export class Drawing {
     this.ctx.restore();
   }
 
+  private drawCVD(): void {
+    const h = this.scales.cvdHeight();
+    if (h <= 0) return;
+
+    const vr = this.scales.getVisibleRange();
+    if (vr.startIndex >= this.cvdValues.length) return;
+
+    // Determine min/max for CURRENT VIEW
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.cvdValues.length); i++) {
+      const v = this.cvdValues[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+
+    if (min === Infinity) return;
+
+    const range = max - min;
+    if (range === 0) {
+      min -= 1;
+      max += 1;
+    } else {
+      const pad = range * 0.1;
+      min -= pad;
+      max += pad;
+    }
+
+    const ctx = this.ctx;
+    const originY = this.scales.cvdOriginY();
+    const width = this.ctx.canvas.width / window.devicePixelRatio;
+
+    // Draw background
+    ctx.save();
+    ctx.fillStyle = this.theme.background || '#000';
+    ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+
+    // Clip
+    ctx.beginPath();
+    ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+    ctx.clip();
+
+    // Draw Zero line
+    if (min < 0 && max > 0) {
+      const yZero = this.scales.cvdToY(0, min, max);
+      ctx.strokeStyle = '#333';
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(this.margin.left, yZero);
+      ctx.lineTo(width - this.margin.right, yZero);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw CVD Line
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    let first = true;
+    for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.cvdValues.length); i++) {
+      const x = this.scales.indexToX(i, vr.startIndex);
+      const y = this.scales.cvdToY(this.cvdValues[i], min, max);
+      if (first) {
+        ctx.moveTo(x, y);
+        first = false;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw CVD Y-Axis Labels Area
+    const right = width - this.margin.right;
+    ctx.save();
+    ctx.fillStyle = this.theme.scaleBackground || '#111';
+    ctx.fillRect(right, originY, this.margin.right, h);
+    ctx.strokeStyle = this.theme.scaleBorder || '#444';
+    ctx.strokeRect(right + 0.5, originY, 0.5, h);
+
+    // Labels
+    ctx.fillStyle = this.theme.textColor || '#aaa';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '10px system-ui';
+
+    // Max
+    ctx.fillText(this.scales.formatK(Math.round(max)), right + 5, originY + 12);
+    // Min
+    ctx.fillText(this.scales.formatK(Math.round(min)), right + 5, originY + h - 12);
+    // Zero
+    if (min < 0 && max > 0) {
+      const yZero = this.scales.cvdToY(0, min, max);
+      if (yZero > originY + 20 && yZero < originY + h - 20) {
+        ctx.fillText("0", right + 5, yZero);
+      }
+    }
+
+    ctx.restore();
+  }
 
   private drawScales(width: number, height: number): void {
     // Timeline position (fixed at bottom, CVD is drawn separately above it)
@@ -147,9 +256,9 @@ export class Drawing {
     // Draw price bar (unchanged)
     const right = width - this.margin.right;
     this.ctx.fillStyle = this.theme.scaleBackground || '#111';
-    this.ctx.fillRect(right, 0, this.margin.right, height);
+    this.ctx.fillRect(right, 0, this.margin.right, this.scales.chartHeight()); // Only fill price chart height
     this.ctx.strokeStyle = this.theme.scaleBorder || '#444';
-    this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, height - this.margin.top - this.margin.bottom);
+    this.ctx.strokeRect(right + 0.5, this.margin.top, 0.5, this.scales.chartHeight());
 
     // Price labels
     this.ctx.fillStyle = this.theme.textColor || '#aaa';

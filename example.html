@@ -1,78 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Volume Footprint Price Chart</title>
   <link rel="stylesheet" href="src/styles.css">
   <style>
-    html, body {
+    html,
+    body {
       height: 100%;
       margin: 0;
     }
+
     #container {
       height: 100%;
     }
   </style>
 </head>
+
 <body>
- <div id="container">
-   <!-- Toolbars and chart structure will be created automatically by the library -->
- </div>
+  <div id="container">
+    <!-- Toolbars and chart structure will be created automatically by the library -->
+  </div>
 
- <script src="dist/index.js"></script>
- <script>
-  // =============================================================
-  // Volume Footprint Chart Example — Matches original styling
-  // =============================================================
+  <div id="controls"
+    style="position: absolute; top: 50px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; color: white; z-index: 1000;">
+    <h3>CVD Options</h3>
+    <label>
+      <input type="checkbox" id="showCVD"> Show CVD
+    </label>
+    <br><br>
+    <label>
+      Height Ratio:
+      <input type="number" id="cvdRatio" min="0.1" max="0.5" step="0.05" value="0.2" style="width: 50px;">
+    </label>
+    <br><br>
+    <label>
+      Type:
+      <select id="cvdType" style="color: black;">
+        <option value="ticker">Ticker (Vol * Sign)</option>
+        <option value="footprint">Footprint (Buy - Sell)</option>
+      </select>
+    </label>
+  </div>
 
-  const container = document.getElementById('container');
+  <script src="dist/index.js"></script>
+  <script>
+    // =============================================================
+    // Volume Footprint Chart Example — Matches original styling
+    // =============================================================
 
-  // Create chart using the VFC Chart class directly
-  const chart = new bitchart.Chart(container, {
-     width: window.innerWidth,
-     // height will be automatically set from the container
-     showGrid: true
-   });
+    const container = document.getElementById('container');
 
-   // Generate demo data
-   const candles = makeDemoCandles();
+    // Create chart using the VFC Chart class directly
+    const chart = new bitchart.Chart(container, {
+      width: window.innerWidth,
+      // height will be automatically set from the container
+      showGrid: true
+    });
 
-   // Load initial data - shows the end of the data
-   chart.setData(candles);
+    // Generate demo data
+    const candles = makeDemoCandles();
 
-   // Demo data generator (matches original)
-   function randNorm(){
-     let u=0,v=0; while(u===0) u=Math.random(); while(v===0) v=Math.random();
-     return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
-   }
+    // Load initial data - shows the end of the data
+    chart.setData(candles);
 
-   function buildFootprint(high, low){
-     const fp=[]; const span = Math.max(10, high - low); const mid = (high+low)/2; const poc = mid + randNorm()*span*0.05;
-     for (let p = Math.ceil(high/10)*10; p >= Math.floor(low/10)*10; p -= 10){
-       const dist = Math.abs(p - poc) / (span + 10);
-       const base = 200000, amp = 500000;
-       const vol = Math.max(50000, base + (1 - dist) * amp + randNorm() * 150000);
-       const bias = p > mid ? 0.6 : 0.4;
-       const sell = Math.max(0, Math.round(vol * (bias + 0.1*Math.random())));
-       const buy  = Math.max(0, Math.round(vol * (1 - (bias + 0.1*Math.random()))));
-       fp.push({price:p,buy,sell});
-     }
-     return fp;
-   }
+    // Bind CVD controls
+    document.getElementById('showCVD').addEventListener('change', (e) => {
+      chart.updateOptions({ showCVD: e.target.checked });
+    });
 
-   function makeDemoCandles(){
-     const out=[]; let t=Date.now()-60*60*1000; let open=10000;
-     for(let i=0;i<120;i++){
-       const drift = randNorm() * 60;
-       const high = open + Math.abs(randNorm())*120 + 40;
-       const low  = open - Math.abs(randNorm())*120 - 40;
-       const close = open + drift;
-       out.push({ time:new Date(t+=60_000).toISOString(), open, high, low, close, footprint: buildFootprint(high, low) });
-       open = close;
-     }
-     return out;
-   }
- </script>
+    document.getElementById('cvdRatio').addEventListener('change', (e) => {
+      chart.updateOptions({ cvdHeightRatio: parseFloat(e.target.value) });
+    });
+
+    document.getElementById('cvdType').addEventListener('change', (e) => {
+      chart.updateOptions({ cvdType: e.target.value });
+    });
+
+    // Demo data generator (matches original)
+    function randNorm() {
+      let u = 0, v = 0; while (u === 0) u = Math.random(); while (v === 0) v = Math.random();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    function buildFootprint(high, low) {
+      const fp = []; const span = Math.max(10, high - low); const mid = (high + low) / 2; const poc = mid + randNorm() * span * 0.05;
+      for (let p = Math.ceil(high / 10) * 10; p >= Math.floor(low / 10) * 10; p -= 10) {
+        const dist = Math.abs(p - poc) / (span + 10);
+        const base = 200000, amp = 500000;
+        const vol = Math.max(50000, base + (1 - dist) * amp + randNorm() * 150000);
+        const bias = p > mid ? 0.6 : 0.4;
+        const sell = Math.max(0, Math.round(vol * (bias + 0.1 * Math.random())));
+        const buy = Math.max(0, Math.round(vol * (1 - (bias + 0.1 * Math.random()))));
+        fp.push({ price: p, buy, sell });
+      }
+      return fp;
+    }
+
+    function makeDemoCandles() {
+      const out = []; let t = Date.now() - 60 * 60 * 1000; let open = 10000;
+      for (let i = 0; i < 120; i++) {
+        const drift = randNorm() * 60;
+        const high = open + Math.abs(randNorm()) * 120 + 40;
+        const low = open - Math.abs(randNorm()) * 120 - 40;
+        const close = open + drift;
+        out.push({ time: new Date(t += 60_000).toISOString(), open, high, low, close, footprint: buildFootprint(high, low) });
+        open = close;
+      }
+      return out;
+    }
+  </script>
 </body>
+
 </html>

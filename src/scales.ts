@@ -20,6 +20,8 @@ export class Scales {
   private TICK: number;
   private baseRowPx: number;
   private TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number };
+  private showCVD: boolean;
+  private cvdHeightRatio: number;
 
   // Cached ladderTop to prevent recalculation on every access
   private cachedLadderTop: number = 10000;
@@ -36,6 +38,8 @@ export class Scales {
    * @param TICK Price tick size
    * @param baseRowPx Base row height in pixels
    * @param TEXT_VIS Text visibility thresholds
+   * @param showCVD Whether CVD indicator is shown
+   * @param cvdHeightRatio Ratio of total height used for CVD
    */
   constructor(
     data: CandleData[],
@@ -46,7 +50,9 @@ export class Scales {
     showVolumeFootprint: boolean,
     TICK: number,
     baseRowPx: number,
-    TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number }
+    TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number },
+    showCVD: boolean = false,
+    cvdHeightRatio: number = 0.2
   ) {
     this.data = data;
     this.margin = margin;
@@ -57,11 +63,40 @@ export class Scales {
     this.TICK = TICK;
     this.baseRowPx = baseRowPx;
     this.TEXT_VIS = TEXT_VIS;
+    this.showCVD = showCVD;
+    this.cvdHeightRatio = cvdHeightRatio;
   }
 
-  /** Returns the height of the chart area in pixels (excluding margins). */
+  /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
   chartHeight(): number {
-    return this.canvasHeight - this.margin.top - this.margin.bottom;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+    if (!this.showCVD) {
+      return totalHeight;
+    }
+    // Reserve specific ratio for CVD, plus some gap
+    return totalHeight * (1 - this.cvdHeightRatio) - 2; // 2px gap
+  }
+
+  /** Returns the height of the CVD pane. */
+  cvdHeight(): number {
+    if (!this.showCVD) return 0;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+    return totalHeight * this.cvdHeightRatio;
+  }
+
+  /** Returns the Y coordinate where the CVD pane starts. */
+  cvdOriginY(): number {
+    return this.margin.top + this.chartHeight() + 2; // + 2px gap
+  }
+
+  /** Maps a CVD value to a Y coordinate within the CVD pane. */
+  cvdToY(value: number, min: number, max: number): number {
+    if (min === max) return this.cvdOriginY() + this.cvdHeight() / 2;
+    const h = this.cvdHeight();
+    const range = max - min;
+    const ratio = (value - min) / range;
+    // Invert Y because canvas Y increases downwards
+    return this.cvdOriginY() + h - ratio * h;
   }
 
   /** Returns the margin configuration. */

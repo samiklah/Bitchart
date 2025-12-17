@@ -54,7 +54,10 @@ export class VFC {
       initialZoomX: options.initialZoomX || 1,
       initialZoomY: options.initialZoomY || 1,
       margin: options.margin || this.margin,
-      theme: options.theme || {}
+      theme: options.theme || {},
+      showCVD: options.showCVD ?? false,
+      cvdHeightRatio: options.cvdHeightRatio || 0.2,
+      cvdType: options.cvdType || 'ticker'
     };
 
     this.events = events;

@@ -120,6 +120,12 @@ export interface VFCOptions {
     };
     /** Custom color theme for the chart */
     theme?: VFCTheme;
+    /** Whether to show the Cumulative Volume Delta (CVD) indicator. Default: false */
+    showCVD?: boolean;
+    /** Height ratio for the CVD pane (0 to 1). Default: 0.2 */
+    cvdHeightRatio?: number;
+    /** Method for calculating CVD: 'ticker' (user formula) or 'footprint' (standard). Default: 'ticker' */
+    cvdType?: 'ticker' | 'footprint';
 }
 /**
  * Event callbacks for chart interactions.

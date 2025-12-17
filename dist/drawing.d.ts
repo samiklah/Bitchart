@@ -19,6 +19,8 @@ export declare class Drawing {
     private crosshair;
     private lastPrice;
     private interactions;
+    private cvdValues;
+    updateCVD(values: number[]): void;
     constructor(ctx: CanvasRenderingContext2D, data: CandleData[], margin: {
         top: number;
         bottom: number;
@@ -33,9 +35,10 @@ export declare class Drawing {
         x: number;
         y: number;
         visible: boolean;
-    }, lastPrice: number | null, interactions: any);
+    }, lastPrice: number | null, interactions: any, cvdValues?: number[]);
     drawAll(): void;
     private drawChart;
     private drawVolumeHeatmap;
+    private drawCVD;
     private drawScales;
 }
