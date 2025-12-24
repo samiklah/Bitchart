@@ -25,6 +25,8 @@ export declare class Chart {
     private volumeHeatmapBtn;
     private volumeHeatmapDropdown;
     private measureBtn;
+    private cvdBtn;
+    private cvdDropdown;
     private showCVD;
     private cvdDynamic;
     private cvdValues;

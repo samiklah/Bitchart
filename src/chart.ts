@@ -34,6 +34,8 @@ export class Chart {
   private volumeHeatmapBtn: HTMLButtonElement | null = null;
   private volumeHeatmapDropdown: HTMLDivElement | null = null;
   private measureBtn: HTMLButtonElement | null = null;
+  private cvdBtn: HTMLButtonElement | null = null;
+  private cvdDropdown: HTMLDivElement | null = null;
 
   // CVD state
   private showCVD = false;
@@ -218,6 +220,87 @@ export class Chart {
     measureBtn.textContent = '📐 Measure';
     topToolbar.appendChild(measureBtn);
 
+    // Create CVD dropdown container
+    const cvdContainer = document.createElement('div');
+    cvdContainer.className = 'dropdown-container';
+    cvdContainer.style.position = 'relative';
+    cvdContainer.style.display = 'inline-block';
+
+    const cvdBtn = document.createElement('button');
+    cvdBtn.id = 'cvdToggle';
+    cvdBtn.className = 'tool-btn dropdown-btn';
+    cvdBtn.textContent = 'CVD';
+    cvdBtn.title = 'Cumulative Volume Delta options';
+    cvdContainer.appendChild(cvdBtn);
+
+    // Create CVD dropdown menu
+    const cvdDropdown = document.createElement('div');
+    cvdDropdown.className = 'dropdown-menu cvd-dropdown';
+    cvdDropdown.style.position = 'absolute';
+    cvdDropdown.style.top = '100%';
+    cvdDropdown.style.left = '0';
+    cvdDropdown.style.backgroundColor = '#1a1a1a';
+    cvdDropdown.style.border = '1px solid #444';
+    cvdDropdown.style.borderRadius = '4px';
+    cvdDropdown.style.minWidth = '140px';
+    cvdDropdown.style.zIndex = '1000';
+    cvdDropdown.style.display = 'none';
+    cvdDropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+
+    // Ticker option
+    const tickerOption = document.createElement('div');
+    tickerOption.className = 'dropdown-item';
+    tickerOption.textContent = 'Ticker (Vol × Sign)';
+    tickerOption.style.padding = '8px 12px';
+    tickerOption.style.cursor = 'pointer';
+    tickerOption.style.color = '#fff';
+    tickerOption.style.fontSize = '12px';
+    tickerOption.addEventListener('mouseenter', () => tickerOption.style.backgroundColor = '#333');
+    tickerOption.addEventListener('mouseleave', () => tickerOption.style.backgroundColor = 'transparent');
+    tickerOption.addEventListener('click', () => {
+      this.updateOptions({ showCVD: true, cvdType: 'ticker' });
+      this.updateButtonText();
+      cvdDropdown.style.display = 'none';
+    });
+    cvdDropdown.appendChild(tickerOption);
+
+    // Footprint option
+    const footprintOption = document.createElement('div');
+    footprintOption.className = 'dropdown-item';
+    footprintOption.textContent = 'Footprint (Buy − Sell)';
+    footprintOption.style.padding = '8px 12px';
+    footprintOption.style.cursor = 'pointer';
+    footprintOption.style.color = '#fff';
+    footprintOption.style.fontSize = '12px';
+    footprintOption.addEventListener('mouseenter', () => footprintOption.style.backgroundColor = '#333');
+    footprintOption.addEventListener('mouseleave', () => footprintOption.style.backgroundColor = 'transparent');
+    footprintOption.addEventListener('click', () => {
+      this.updateOptions({ showCVD: true, cvdType: 'footprint' });
+      this.updateButtonText();
+      cvdDropdown.style.display = 'none';
+    });
+    cvdDropdown.appendChild(footprintOption);
+
+    // Off option
+    const cvdOffOption = document.createElement('div');
+    cvdOffOption.className = 'dropdown-item';
+    cvdOffOption.textContent = 'Off';
+    cvdOffOption.style.padding = '8px 12px';
+    cvdOffOption.style.cursor = 'pointer';
+    cvdOffOption.style.color = '#fff';
+    cvdOffOption.style.fontSize = '12px';
+    cvdOffOption.addEventListener('mouseenter', () => cvdOffOption.style.backgroundColor = '#333');
+    cvdOffOption.addEventListener('mouseleave', () => cvdOffOption.style.backgroundColor = 'transparent');
+    cvdOffOption.addEventListener('click', () => {
+      this.updateOptions({ showCVD: false });
+      this.updateButtonText();
+      cvdDropdown.style.display = 'none';
+    });
+    cvdDropdown.appendChild(cvdOffOption);
+
+    cvdContainer.appendChild(cvdDropdown);
+    topToolbar.appendChild(cvdContainer);
+
     const hint = document.createElement('span');
     hint.className = 'hint';
     hint.textContent = 'Volume Footprint Chart';
@@ -239,8 +322,10 @@ export class Chart {
     const toggleGridBtn = container.querySelector('#toggleGrid') as HTMLButtonElement;
     const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint') as HTMLButtonElement;
     const volumeHeatmapBtn = container.querySelector('#volumeHeatmap') as HTMLButtonElement;
-    const volumeHeatmapDropdown = container.querySelector('.dropdown-menu') as HTMLDivElement;
+    const volumeHeatmapDropdown = container.querySelector('.dropdown-menu:not(.cvd-dropdown)') as HTMLDivElement;
     const measureBtn = container.querySelector('#measure') as HTMLButtonElement;
+    const cvdBtn = container.querySelector('#cvdToggle') as HTMLButtonElement;
+    const cvdDropdown = container.querySelector('.cvd-dropdown') as HTMLDivElement;
 
     // Store references for later use
     this.resetZoomBtn = resetZoomBtn;
@@ -249,6 +334,8 @@ export class Chart {
     this.volumeHeatmapBtn = volumeHeatmapBtn;
     this.volumeHeatmapDropdown = volumeHeatmapDropdown;
     this.measureBtn = measureBtn;
+    this.cvdBtn = cvdBtn;
+    this.cvdDropdown = cvdDropdown;
   }
 
   /**
@@ -344,7 +431,11 @@ export class Chart {
           if (this.cvdDynamic && this.showCVD) this.calculateCVD();
           this.drawing.drawAll();
         },
-        onMouseMove: () => this.drawing.drawAll()
+        onMouseMove: () => this.drawing.drawAll(),
+        onCvdResize: (ratio: number) => {
+          this.options.cvdHeightRatio = ratio;
+          this.updateOptions({ cvdHeightRatio: ratio });
+        }
       },
       this.crosshair,
       this.scales
@@ -487,6 +578,26 @@ export class Chart {
           this.measureBtn?.classList.add('active');
         }
         this.drawing.drawAll();
+      });
+    }
+
+    if (this.cvdBtn && this.cvdDropdown) {
+      this.cvdBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Toggle dropdown visibility
+        const isVisible = this.cvdDropdown!.style.display !== 'none';
+        this.hideAllDropdowns();
+        if (!isVisible) {
+          this.cvdDropdown!.style.display = 'block';
+        }
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!this.cvdBtn?.contains(e.target as Node) &&
+          !this.cvdDropdown?.contains(e.target as Node)) {
+          this.cvdDropdown!.style.display = 'none';
+        }
       });
     }
   }
@@ -680,6 +791,9 @@ export class Chart {
     if (this.showCVD) {
       this.calculateCVD();
     }
+
+    // Update Interactions with the new Scales instance
+    this.interactions.setScales(this.scales);
 
     this.drawing = new Drawing(
       this.ctx,
@@ -894,11 +1008,22 @@ export class Chart {
         this.volumeHeatmapBtn.textContent = 'Volume Heatmap';
       }
     }
+    if (this.cvdBtn) {
+      if (this.showCVD) {
+        const mode = this.cvdType === 'ticker' ? 'Ticker' : 'Footprint';
+        this.cvdBtn.textContent = `CVD (${mode})`;
+      } else {
+        this.cvdBtn.textContent = 'CVD';
+      }
+    }
   }
 
   private hideAllDropdowns() {
     if (this.volumeHeatmapDropdown) {
       this.volumeHeatmapDropdown.style.display = 'none';
+    }
+    if (this.cvdDropdown) {
+      this.cvdDropdown.style.display = 'none';
     }
   }
 

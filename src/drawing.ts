@@ -179,6 +179,16 @@ export class Drawing {
     const originY = this.scales.cvdOriginY();
     const width = this.ctx.canvas.width / window.devicePixelRatio;
 
+    // Draw divider line (draggable border between chart and CVD)
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.margin.left, originY);
+    ctx.lineTo(width - this.margin.right, originY);
+    ctx.stroke();
+    ctx.restore();
+
     // Draw background
     ctx.save();
     ctx.fillStyle = this.theme.background || '#000';
@@ -234,15 +244,13 @@ export class Drawing {
     ctx.textBaseline = 'middle';
     ctx.font = '10px system-ui';
 
-    // Max
-    ctx.fillText(this.scales.formatK(Math.round(max)), right + 5, originY + 12);
-    // Min
-    ctx.fillText(this.scales.formatK(Math.round(min)), right + 5, originY + h - 12);
-    // Zero
-    if (min < 0 && max > 0) {
-      const yZero = this.scales.cvdToY(0, min, max);
-      if (yZero > originY + 20 && yZero < originY + h - 20) {
-        ctx.fillText("0", right + 5, yZero);
+    // Draw evenly spaced labels (5 labels total)
+    const numLabels = 5;
+    for (let i = 0; i < numLabels; i++) {
+      const value = max - (i * (max - min) / (numLabels - 1));
+      const yPos = this.scales.cvdToY(value, min, max);
+      if (yPos >= originY + 8 && yPos <= originY + h - 8) {
+        ctx.fillText(this.scales.formatK(value), right + 5, yPos);
       }
     }
 

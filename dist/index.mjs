@@ -27,7 +27,11 @@ function formatNumber(v) {
         return (v / 1e6).toFixed(2) + "M";
     if (a >= 1e3)
         return (v / 1e3).toFixed(2) + "K";
-    return Math.round(v).toString();
+    // For small numbers, show up to 2 decimal places if needed
+    if (Number.isInteger(v)) {
+        return v.toString();
+    }
+    return v.toFixed(2);
 }
 /**
  * Calculates the Point of Control (POC) and Value Area (VAH/VAL) for volume profile analysis.
@@ -314,6 +318,9 @@ class Interactions {
     constructor(canvas, margin, view, events, crosshair, scales) {
         this.momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
         this.PAN_INVERT = { x: true, y: false };
+        // CVD resize state
+        this.isDraggingCvdDivider = false;
+        this.cvdDividerHitZone = 6; // pixels around the divider that are draggable
         // Measure state
         this.isMeasureMode = false;
         this.measureRectangle = null;
@@ -376,6 +383,13 @@ class Interactions {
         const rect = this.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+        // Check if clicking on CVD divider (the border between main chart and CVD pane)
+        const cvdHeight = this.scales.cvdHeight();
+        const cvdOriginY = this.scales.cvdOriginY();
+        if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
+            this.handleCvdDividerDrag(e, rect);
+            return;
+        }
         // Check if we're in measure mode
         if (this.isMeasureMode) {
             this.handleMeasurePointerDown(e, x, y);
@@ -469,6 +483,39 @@ class Interactions {
     clearMeasureRectangle() {
         this.measureRectangle = null;
     }
+    /** Updates the scales reference when options change */
+    setScales(scales) {
+        this.scales = scales;
+    }
+    handleCvdDividerDrag(e, rect) {
+        this.isDraggingCvdDivider = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        this.canvas.style.cursor = 'ns-resize';
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const availableHeight = canvasHeight - this.margin.top - this.margin.bottom;
+        const onMove = (ev) => {
+            var _a, _b;
+            const y = ev.clientY - rect.top;
+            // Calculate new ratio based on where the divider is dragged
+            // CVD is at the bottom, so we calculate how much space is below the drag point
+            const cvdHeight = canvasHeight - this.margin.bottom - y;
+            let newRatio = cvdHeight / availableHeight;
+            // Clamp the ratio between 0.1 and 0.6
+            newRatio = Math.max(0.1, Math.min(0.6, newRatio));
+            (_b = (_a = this.events).onCvdResize) === null || _b === void 0 ? void 0 : _b.call(_a, newRatio);
+        };
+        const onUp = () => {
+            this.isDraggingCvdDivider = false;
+            this.canvas.releasePointerCapture(e.pointerId);
+            this.canvas.style.cursor = '';
+            this.canvas.removeEventListener('pointermove', onMove);
+            this.canvas.removeEventListener('pointerup', onUp);
+            this.canvas.removeEventListener('pointercancel', onUp);
+        };
+        this.canvas.addEventListener('pointermove', onMove);
+        this.canvas.addEventListener('pointerup', onUp);
+        this.canvas.addEventListener('pointercancel', onUp);
+    }
     cancelMomentum() {
         if (this.momentum.raf) {
             cancelAnimationFrame(this.momentum.raf);
@@ -508,6 +555,15 @@ class Interactions {
         const rect = this.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+        // Check if mouse is over CVD divider
+        const cvdHeight = this.scales.cvdHeight();
+        const cvdOriginY = this.scales.cvdOriginY();
+        if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
+            this.canvas.style.cursor = 'ns-resize';
+        }
+        else if (!this.isDraggingCvdDivider) {
+            this.canvas.style.cursor = '';
+        }
         // Check if mouse is over the chart area
         const chartRight = this.canvas.clientWidth - this.margin.right;
         const canvasHeight = this.canvas.height / window.devicePixelRatio;
@@ -1080,6 +1136,15 @@ class Drawing {
         const ctx = this.ctx;
         const originY = this.scales.cvdOriginY();
         const width = this.ctx.canvas.width / window.devicePixelRatio;
+        // Draw divider line (draggable border between chart and CVD)
+        ctx.save();
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(this.margin.left, originY);
+        ctx.lineTo(width - this.margin.right, originY);
+        ctx.stroke();
+        ctx.restore();
         // Draw background
         ctx.save();
         ctx.fillStyle = this.theme.background || '#000';
@@ -1129,15 +1194,13 @@ class Drawing {
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.font = '10px system-ui';
-        // Max
-        ctx.fillText(this.scales.formatK(Math.round(max)), right + 5, originY + 12);
-        // Min
-        ctx.fillText(this.scales.formatK(Math.round(min)), right + 5, originY + h - 12);
-        // Zero
-        if (min < 0 && max > 0) {
-            const yZero = this.scales.cvdToY(0, min, max);
-            if (yZero > originY + 20 && yZero < originY + h - 20) {
-                ctx.fillText("0", right + 5, yZero);
+        // Draw evenly spaced labels (5 labels total)
+        const numLabels = 5;
+        for (let i = 0; i < numLabels; i++) {
+            const value = max - (i * (max - min) / (numLabels - 1));
+            const yPos = this.scales.cvdToY(value, min, max);
+            if (yPos >= originY + 8 && yPos <= originY + h - 8) {
+                ctx.fillText(this.scales.formatK(value), right + 5, yPos);
             }
         }
         ctx.restore();
@@ -1338,6 +1401,80 @@ class Chart {
         measureBtn.title = 'Measure Tool';
         measureBtn.textContent = '📐 Measure';
         topToolbar.appendChild(measureBtn);
+        // Create CVD dropdown container
+        const cvdContainer = document.createElement('div');
+        cvdContainer.className = 'dropdown-container';
+        cvdContainer.style.position = 'relative';
+        cvdContainer.style.display = 'inline-block';
+        const cvdBtn = document.createElement('button');
+        cvdBtn.id = 'cvdToggle';
+        cvdBtn.className = 'tool-btn dropdown-btn';
+        cvdBtn.textContent = 'CVD';
+        cvdBtn.title = 'Cumulative Volume Delta options';
+        cvdContainer.appendChild(cvdBtn);
+        // Create CVD dropdown menu
+        const cvdDropdown = document.createElement('div');
+        cvdDropdown.className = 'dropdown-menu cvd-dropdown';
+        cvdDropdown.style.position = 'absolute';
+        cvdDropdown.style.top = '100%';
+        cvdDropdown.style.left = '0';
+        cvdDropdown.style.backgroundColor = '#1a1a1a';
+        cvdDropdown.style.border = '1px solid #444';
+        cvdDropdown.style.borderRadius = '4px';
+        cvdDropdown.style.minWidth = '140px';
+        cvdDropdown.style.zIndex = '1000';
+        cvdDropdown.style.display = 'none';
+        cvdDropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+        // Ticker option
+        const tickerOption = document.createElement('div');
+        tickerOption.className = 'dropdown-item';
+        tickerOption.textContent = 'Ticker (Vol × Sign)';
+        tickerOption.style.padding = '8px 12px';
+        tickerOption.style.cursor = 'pointer';
+        tickerOption.style.color = '#fff';
+        tickerOption.style.fontSize = '12px';
+        tickerOption.addEventListener('mouseenter', () => tickerOption.style.backgroundColor = '#333');
+        tickerOption.addEventListener('mouseleave', () => tickerOption.style.backgroundColor = 'transparent');
+        tickerOption.addEventListener('click', () => {
+            this.updateOptions({ showCVD: true, cvdType: 'ticker' });
+            this.updateButtonText();
+            cvdDropdown.style.display = 'none';
+        });
+        cvdDropdown.appendChild(tickerOption);
+        // Footprint option
+        const footprintOption = document.createElement('div');
+        footprintOption.className = 'dropdown-item';
+        footprintOption.textContent = 'Footprint (Buy − Sell)';
+        footprintOption.style.padding = '8px 12px';
+        footprintOption.style.cursor = 'pointer';
+        footprintOption.style.color = '#fff';
+        footprintOption.style.fontSize = '12px';
+        footprintOption.addEventListener('mouseenter', () => footprintOption.style.backgroundColor = '#333');
+        footprintOption.addEventListener('mouseleave', () => footprintOption.style.backgroundColor = 'transparent');
+        footprintOption.addEventListener('click', () => {
+            this.updateOptions({ showCVD: true, cvdType: 'footprint' });
+            this.updateButtonText();
+            cvdDropdown.style.display = 'none';
+        });
+        cvdDropdown.appendChild(footprintOption);
+        // Off option
+        const cvdOffOption = document.createElement('div');
+        cvdOffOption.className = 'dropdown-item';
+        cvdOffOption.textContent = 'Off';
+        cvdOffOption.style.padding = '8px 12px';
+        cvdOffOption.style.cursor = 'pointer';
+        cvdOffOption.style.color = '#fff';
+        cvdOffOption.style.fontSize = '12px';
+        cvdOffOption.addEventListener('mouseenter', () => cvdOffOption.style.backgroundColor = '#333');
+        cvdOffOption.addEventListener('mouseleave', () => cvdOffOption.style.backgroundColor = 'transparent');
+        cvdOffOption.addEventListener('click', () => {
+            this.updateOptions({ showCVD: false });
+            this.updateButtonText();
+            cvdDropdown.style.display = 'none';
+        });
+        cvdDropdown.appendChild(cvdOffOption);
+        cvdContainer.appendChild(cvdDropdown);
+        topToolbar.appendChild(cvdContainer);
         const hint = document.createElement('span');
         hint.className = 'hint';
         hint.textContent = 'Volume Footprint Chart';
@@ -1355,8 +1492,10 @@ class Chart {
         const toggleGridBtn = container.querySelector('#toggleGrid');
         const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint');
         const volumeHeatmapBtn = container.querySelector('#volumeHeatmap');
-        const volumeHeatmapDropdown = container.querySelector('.dropdown-menu');
+        const volumeHeatmapDropdown = container.querySelector('.dropdown-menu:not(.cvd-dropdown)');
         const measureBtn = container.querySelector('#measure');
+        const cvdBtn = container.querySelector('#cvdToggle');
+        const cvdDropdown = container.querySelector('.cvd-dropdown');
         // Store references for later use
         this.resetZoomBtn = resetZoomBtn;
         this.toggleGridBtn = toggleGridBtn;
@@ -1364,6 +1503,8 @@ class Chart {
         this.volumeHeatmapBtn = volumeHeatmapBtn;
         this.volumeHeatmapDropdown = volumeHeatmapDropdown;
         this.measureBtn = measureBtn;
+        this.cvdBtn = cvdBtn;
+        this.cvdDropdown = cvdDropdown;
     }
     /**
      * Initializes the canvas element and context.
@@ -1443,7 +1584,11 @@ class Chart {
                     this.calculateCVD();
                 this.drawing.drawAll();
             },
-            onMouseMove: () => this.drawing.drawAll()
+            onMouseMove: () => this.drawing.drawAll(),
+            onCvdResize: (ratio) => {
+                this.options.cvdHeightRatio = ratio;
+                this.updateOptions({ cvdHeightRatio: ratio });
+            }
         }, this.crosshair, this.scales);
         this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
     }
@@ -1468,6 +1613,8 @@ class Chart {
         this.volumeHeatmapBtn = null;
         this.volumeHeatmapDropdown = null;
         this.measureBtn = null;
+        this.cvdBtn = null;
+        this.cvdDropdown = null;
         // CVD state
         this.showCVD = false;
         this.cvdDynamic = true;
@@ -1590,6 +1737,25 @@ class Chart {
                 this.drawing.drawAll();
             });
         }
+        if (this.cvdBtn && this.cvdDropdown) {
+            this.cvdBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Toggle dropdown visibility
+                const isVisible = this.cvdDropdown.style.display !== 'none';
+                this.hideAllDropdowns();
+                if (!isVisible) {
+                    this.cvdDropdown.style.display = 'block';
+                }
+            });
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                var _a, _b;
+                if (!((_a = this.cvdBtn) === null || _a === void 0 ? void 0 : _a.contains(e.target)) &&
+                    !((_b = this.cvdDropdown) === null || _b === void 0 ? void 0 : _b.contains(e.target))) {
+                    this.cvdDropdown.style.display = 'none';
+                }
+            });
+        }
     }
     handleWheel(e) {
         this.interactions.handleWheel(e);
@@ -1694,6 +1860,8 @@ class Chart {
         if (this.showCVD) {
             this.calculateCVD();
         }
+        // Update Interactions with the new Scales instance
+        this.interactions.setScales(this.scales);
         this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
         this.layout();
     }
@@ -1853,10 +2021,22 @@ class Chart {
                 this.volumeHeatmapBtn.textContent = 'Volume Heatmap';
             }
         }
+        if (this.cvdBtn) {
+            if (this.showCVD) {
+                const mode = this.cvdType === 'ticker' ? 'Ticker' : 'Footprint';
+                this.cvdBtn.textContent = `CVD (${mode})`;
+            }
+            else {
+                this.cvdBtn.textContent = 'CVD';
+            }
+        }
     }
     hideAllDropdowns() {
         if (this.volumeHeatmapDropdown) {
             this.volumeHeatmapDropdown.style.display = 'none';
+        }
+        if (this.cvdDropdown) {
+            this.cvdDropdown.style.display = 'none';
         }
     }
     // Getters for API access

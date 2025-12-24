@@ -17,6 +17,8 @@ export declare class Interactions {
     private momentum;
     private readonly PAN_INVERT;
     private scales;
+    private isDraggingCvdDivider;
+    private cvdDividerHitZone;
     private isMeasureMode;
     private measureRectangle;
     /**
@@ -38,7 +40,9 @@ export declare class Interactions {
         zoomX: number;
         offsetRows: number;
         offsetX: number;
-    }, events: VFCEvents, crosshair: {
+    }, events: VFCEvents & {
+        onCvdResize?: (ratio: number) => void;
+    }, crosshair: {
         x: number;
         y: number;
         visible: boolean;
@@ -55,6 +59,9 @@ export declare class Interactions {
     getMeasureMode(): boolean;
     getMeasureRectangle(): MeasureRectangle | null;
     clearMeasureRectangle(): void;
+    /** Updates the scales reference when options change */
+    setScales(scales: Scales): void;
+    private handleCvdDividerDrag;
     private cancelMomentum;
     private startMomentum;
     private stepMomentum;

@@ -620,7 +620,11 @@ export class VFC {
     if (a >= 1e12) return (v / 1e12).toFixed(2) + "T";
     if (a >= 1e6) return (v / 1e6).toFixed(2) + "M";
     if (a >= 1e3) return (v / 1e3).toFixed(2) + "K";
-    return Math.round(v).toString();
+    // For small numbers, show up to 2 decimal places if needed
+    if (Number.isInteger(v)) {
+      return v.toString();
+    }
+    return v.toFixed(2);
   }
 
 

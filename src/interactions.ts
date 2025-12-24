@@ -14,12 +14,15 @@ export class Interactions {
   private canvas: HTMLCanvasElement;
   private margin: { top: number; bottom: number; left: number; right: number };
   private view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number };
-  private events: VFCEvents;
+  private events: VFCEvents & { onCvdResize?: (ratio: number) => void };
   private crosshair: { x: number; y: number; visible: boolean };
   private momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
   private readonly PAN_INVERT = { x: true, y: false };
   private scales: Scales;
 
+  // CVD resize state
+  private isDraggingCvdDivider = false;
+  private cvdDividerHitZone = 6; // pixels around the divider that are draggable
 
   // Measure state
   private isMeasureMode = false;
@@ -38,7 +41,7 @@ export class Interactions {
     canvas: HTMLCanvasElement,
     margin: { top: number; bottom: number; left: number; right: number },
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
-    events: VFCEvents,
+    events: VFCEvents & { onCvdResize?: (ratio: number) => void },
     crosshair: { x: number; y: number; visible: boolean },
     scales: Scales
   ) {
@@ -103,6 +106,14 @@ export class Interactions {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Check if clicking on CVD divider (the border between main chart and CVD pane)
+    const cvdHeight = this.scales.cvdHeight();
+    const cvdOriginY = this.scales.cvdOriginY();
+    if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
+      this.handleCvdDividerDrag(e, rect);
+      return;
+    }
+
     // Check if we're in measure mode
     if (this.isMeasureMode) {
       this.handleMeasurePointerDown(e, x, y);
@@ -154,7 +165,7 @@ export class Interactions {
     const yBottom = canvasHeight - this.margin.bottom;
 
     const overChartBody = x >= this.margin.left && x <= chartRight &&
-                          y >= this.margin.top && y <= yBottom;
+      y >= this.margin.top && y <= yBottom;
 
     if (!overChartBody) return;
 
@@ -219,6 +230,44 @@ export class Interactions {
     this.measureRectangle = null;
   }
 
+  /** Updates the scales reference when options change */
+  setScales(scales: Scales): void {
+    this.scales = scales;
+  }
+
+  private handleCvdDividerDrag(e: PointerEvent, rect: DOMRect): void {
+    this.isDraggingCvdDivider = true;
+    this.canvas.setPointerCapture(e.pointerId);
+    this.canvas.style.cursor = 'ns-resize';
+
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const availableHeight = canvasHeight - this.margin.top - this.margin.bottom;
+
+    const onMove = (ev: PointerEvent) => {
+      const y = ev.clientY - rect.top;
+      // Calculate new ratio based on where the divider is dragged
+      // CVD is at the bottom, so we calculate how much space is below the drag point
+      const cvdHeight = canvasHeight - this.margin.bottom - y;
+      let newRatio = cvdHeight / availableHeight;
+      // Clamp the ratio between 0.1 and 0.6
+      newRatio = Math.max(0.1, Math.min(0.6, newRatio));
+      this.events.onCvdResize?.(newRatio);
+    };
+
+    const onUp = () => {
+      this.isDraggingCvdDivider = false;
+      this.canvas.releasePointerCapture(e.pointerId);
+      this.canvas.style.cursor = '';
+      this.canvas.removeEventListener('pointermove', onMove);
+      this.canvas.removeEventListener('pointerup', onUp);
+      this.canvas.removeEventListener('pointercancel', onUp);
+    };
+
+    this.canvas.addEventListener('pointermove', onMove);
+    this.canvas.addEventListener('pointerup', onUp);
+    this.canvas.addEventListener('pointercancel', onUp);
+  }
+
   private cancelMomentum(): void {
     if (this.momentum.raf) {
       cancelAnimationFrame(this.momentum.raf);
@@ -261,13 +310,22 @@ export class Interactions {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Check if mouse is over CVD divider
+    const cvdHeight = this.scales.cvdHeight();
+    const cvdOriginY = this.scales.cvdOriginY();
+    if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
+      this.canvas.style.cursor = 'ns-resize';
+    } else if (!this.isDraggingCvdDivider) {
+      this.canvas.style.cursor = '';
+    }
+
     // Check if mouse is over the chart area
     const chartRight = this.canvas.clientWidth - this.margin.right;
     const canvasHeight = this.canvas.height / window.devicePixelRatio;
     const yBottom = canvasHeight - this.margin.bottom;
 
     const overChartBody = x >= this.margin.left && x <= chartRight &&
-                          y >= this.margin.top && y <= yBottom;
+      y >= this.margin.top && y <= yBottom;
 
     const wasVisible = this.crosshair.visible;
     if (overChartBody) {
