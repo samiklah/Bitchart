@@ -8,4 +8,5 @@ export { Chart } from './chart';
 export { Scales } from './scales';
 export { Interactions } from './interactions';
 export { Drawing } from './drawing';
+export { Aggregator, Timeframe } from './aggregator';
 export { Chart as VFC } from './chart';

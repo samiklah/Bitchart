@@ -7,6 +7,7 @@ import { CandleData, VFCOptions, VFCEvents } from './types';
 import { Scales } from './scales';
 import { Interactions } from './interactions';
 import { Drawing } from './drawing';
+import { Aggregator, Timeframe } from './aggregator';
 
 export class Chart {
   private canvas!: HTMLCanvasElement;
@@ -36,6 +37,12 @@ export class Chart {
   private measureBtn: HTMLButtonElement | null = null;
   private cvdBtn: HTMLButtonElement | null = null;
   private cvdDropdown: HTMLDivElement | null = null;
+
+  // Timeframe aggregation state
+  private aggregator: Aggregator = new Aggregator();
+  private currentTimeframe: Timeframe = '1m';
+  private timeframeButtons: Map<Timeframe, HTMLButtonElement> = new Map();
+  private isAggregatedData: boolean = false; // Flag to track if current data is aggregated
 
   // CVD state
   private showCVD = false;
@@ -301,6 +308,20 @@ export class Chart {
     cvdContainer.appendChild(cvdDropdown);
     topToolbar.appendChild(cvdContainer);
 
+    // Create timeframe button group
+    const tfContainer = document.createElement('div');
+    tfContainer.className = 'tf-button-group';
+
+    const timeframes: Timeframe[] = ['1m', '5m', '15m', '30m', '1h'];
+    for (const tf of timeframes) {
+      const btn = document.createElement('button');
+      btn.className = 'tool-btn tf-btn' + (tf === '1m' ? ' active' : '');
+      btn.textContent = tf.toUpperCase();
+      btn.dataset.timeframe = tf;
+      tfContainer.appendChild(btn);
+    }
+    topToolbar.appendChild(tfContainer);
+
     const hint = document.createElement('span');
     hint.className = 'hint';
     hint.textContent = 'Volume Footprint Chart';
@@ -336,6 +357,15 @@ export class Chart {
     this.measureBtn = measureBtn;
     this.cvdBtn = cvdBtn;
     this.cvdDropdown = cvdDropdown;
+
+    // Store timeframe button references
+    const tfButtons = container.querySelectorAll('.tf-btn') as NodeListOf<HTMLButtonElement>;
+    tfButtons.forEach(btn => {
+      const tf = btn.dataset.timeframe as Timeframe;
+      if (tf) {
+        this.timeframeButtons.set(tf, btn);
+      }
+    });
   }
 
   /**
@@ -600,6 +630,13 @@ export class Chart {
         }
       });
     }
+
+    // Timeframe button handlers
+    this.timeframeButtons.forEach((btn, tf) => {
+      btn.addEventListener('click', () => {
+        this.setTimeframe(tf);
+      });
+    });
   }
 
   private handleWheel(e: WheelEvent) {
@@ -658,6 +695,22 @@ export class Chart {
   // Public API
   public setData(data: CandleData[]) {
     this.data = data;
+
+    // Store data in aggregator as base 1m data for aggregation support
+    // Only store if this is NOT aggregated data (i.e., it's raw 1m data)
+    if (!this.isAggregatedData) {
+      this.aggregator.setBase1mData(data);
+      this.aggregator.setTimeframe('1m');
+      this.currentTimeframe = '1m';
+      // Update button states to show 1m as active
+      this.timeframeButtons.forEach((btn, tf) => {
+        if (tf === '1m') {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
 
     // Detect tick size from data if not explicitly provided
     if (!this.options.tickSize && this.data.length > 0) {
@@ -1025,6 +1078,102 @@ export class Chart {
     if (this.cvdDropdown) {
       this.cvdDropdown.style.display = 'none';
     }
+  }
+
+  /**
+   * Set the timeframe for aggregation and update display
+   */
+  public setTimeframe(tf: Timeframe): void {
+    this.currentTimeframe = tf;
+    this.aggregator.setTimeframe(tf);
+
+    // Update button active states
+    this.timeframeButtons.forEach((btn, buttonTf) => {
+      if (buttonTf === tf) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    // Get aggregated data and redraw
+    const aggregatedData = this.aggregator.getData();
+    console.log(`setTimeframe(${tf}): aggregated ${aggregatedData.length} candles from ${this.aggregator.getBase1mData().length} 1m candles`);
+
+    if (aggregatedData.length > 0) {
+      // Set flag to prevent setData from overwriting aggregator base data
+      this.isAggregatedData = (tf !== '1m');
+      this.setData(aggregatedData);
+      this.isAggregatedData = false;
+    }
+  }
+
+  /**
+   * Get the current timeframe
+   */
+  public getTimeframe(): Timeframe {
+    return this.currentTimeframe;
+  }
+
+  /**
+   * Set the base 1-minute data and display at current timeframe
+   */
+  public set1mData(data: CandleData[]): void {
+    this.aggregator.setBase1mData(data);
+    const aggregatedData = this.aggregator.getData();
+    this.setData(aggregatedData);
+  }
+
+  /**
+   * Update or add a 1-minute candle (for live updates)
+   * If the candle has the same timestamp as the last candle, it updates it
+   * Otherwise, it adds a new candle
+   */
+  public update1mCandle(candle: CandleData): void {
+    this.aggregator.update1mCandle(candle);
+
+    // Get the aggregated data for current timeframe
+    const aggregatedData = this.aggregator.getData();
+
+    if (aggregatedData.length === 0) {
+      return;
+    }
+
+    // Update the chart data efficiently
+    if (this.data.length === 0) {
+      this.setData(aggregatedData);
+      return;
+    }
+
+    const lastAggCandle = aggregatedData[aggregatedData.length - 1];
+    const lastDataCandle = this.data[this.data.length - 1];
+    const lastAggTime = new Date(lastAggCandle.time).getTime();
+    const lastDataTime = new Date(lastDataCandle.time).getTime();
+
+    if (lastAggTime === lastDataTime) {
+      // Update the last candle in place
+      this.data[this.data.length - 1] = lastAggCandle;
+      this.lastPrice = lastAggCandle.close;
+
+      // Update CVD for the last candle
+      if (this.cvdValues.length > 0) {
+        const prevCVD = this.cvdValues.length > 1 ? this.cvdValues[this.cvdValues.length - 2] : 0;
+        let delta = 0;
+        if (this.cvdType === 'ticker') {
+          const volume = lastAggCandle.footprint.reduce((sum, level) => sum + level.buy + level.sell, 0);
+          const sign = Math.sign(lastAggCandle.close - lastAggCandle.open);
+          delta = lastAggCandle.close === lastAggCandle.open ? 0 : volume * sign;
+        } else {
+          delta = lastAggCandle.footprint.reduce((sum, level) => sum + (level.buy - level.sell), 0);
+        }
+        this.cvdValues[this.cvdValues.length - 1] = prevCVD + delta;
+      }
+    } else {
+      // New candle - append it
+      this.addCandle(lastAggCandle);
+    }
+
+    this.drawing.drawAll();
   }
 
   // Getters for API access

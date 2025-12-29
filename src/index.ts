@@ -23,6 +23,7 @@ export { Chart } from './chart';
 export { Scales } from './scales';
 export { Interactions } from './interactions';
 export { Drawing } from './drawing';
+export { Aggregator, Timeframe } from './aggregator';
 
 // Export the new modular Chart class as VFC for backward compatibility
 export { Chart as VFC } from './chart';

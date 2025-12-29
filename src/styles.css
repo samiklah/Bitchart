@@ -61,3 +61,33 @@
   font-size: 12px;
   margin-left: auto;
 }
+
+/* Timeframe button group */
+.tf-button-group {
+  display: flex;
+  gap: 2px;
+  background: #1a1a1a;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.tf-button-group .tf-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  color: #888;
+}
+
+.tf-button-group .tf-btn:hover {
+  color: #fff;
+  background: #2a2a2a;
+}
+
+.tf-button-group .tf-btn.active {
+  background: #26a69a;
+  color: #fff;
+  border-radius: 4px;
+}

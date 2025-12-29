@@ -3,6 +3,7 @@
  * Provides the primary API for creating and managing chart instances with modular components.
  */
 import { CandleData, VFCOptions, VFCEvents } from './types';
+import { Timeframe } from './aggregator';
 export declare class Chart {
     private canvas;
     private ctx;
@@ -27,6 +28,10 @@ export declare class Chart {
     private measureBtn;
     private cvdBtn;
     private cvdDropdown;
+    private aggregator;
+    private currentTimeframe;
+    private timeframeButtons;
+    private isAggregatedData;
     private showCVD;
     private cvdDynamic;
     private cvdValues;
@@ -78,6 +83,24 @@ export declare class Chart {
     addCandle(candle: CandleData): void;
     private updateButtonText;
     private hideAllDropdowns;
+    /**
+     * Set the timeframe for aggregation and update display
+     */
+    setTimeframe(tf: Timeframe): void;
+    /**
+     * Get the current timeframe
+     */
+    getTimeframe(): Timeframe;
+    /**
+     * Set the base 1-minute data and display at current timeframe
+     */
+    set1mData(data: CandleData[]): void;
+    /**
+     * Update or add a 1-minute candle (for live updates)
+     * If the candle has the same timestamp as the last candle, it updates it
+     * Otherwise, it adds a new candle
+     */
+    update1mCandle(candle: CandleData): void;
     getOptions(): Required<VFCOptions>;
     getShowGrid(): boolean;
 }
