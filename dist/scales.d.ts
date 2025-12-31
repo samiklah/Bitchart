@@ -20,6 +20,7 @@ export declare class Scales {
     private showCVD;
     private cvdHeightRatio;
     private deltaTableHeight;
+    private footprintStyle;
     private cachedLadderTop;
     private ladderTopDirty;
     /**
@@ -50,7 +51,7 @@ export declare class Scales {
         minZoomX: number;
         minRowPx: number;
         minBoxPx: number;
-    }, showCVD?: boolean, cvdHeightRatio?: number, deltaTableHeight?: number);
+    }, showCVD?: boolean, cvdHeightRatio?: number, deltaTableHeight?: number, footprintStyle?: 'bid_ask' | 'delta');
     /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
     chartHeight(): number;
     /** Returns the height of the CVD pane. */
@@ -80,7 +81,11 @@ export declare class Scales {
     rowIndexToPrice(row: number): number;
     rowToY(row: number): number;
     priceToY(price: number): number;
+    /** Returns the offset of the candle wick (center) from the start of the candle's slot. */
+    private wickOffset;
     indexToX(i: number, startIndex: number): number;
+    /** Returns the geometric center of the column/slot. ideal for text alignment. */
+    getSlotCenter(i: number, startIndex: number): number;
     getVisibleRange(): {
         startIndex: number;
         endIndex: number;

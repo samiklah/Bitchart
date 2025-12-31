@@ -14,6 +14,15 @@ export declare function drawFootprintBoxes(ctx: CanvasRenderingContext2D, rows: 
     totSell: number;
 };
 /**
+ * Draws the footprint with delta bars (Delta Volume mode).
+ */
+export declare function drawDeltaFootprintBoxes(ctx: CanvasRenderingContext2D, rows: any[], leftX: number, rightX: number, scales: Scales, theme: any, zoomX: number): {
+    minRow: number;
+    maxRow: number;
+    totBuy: number;
+    totSell: number;
+};
+/**
  * Draws imbalance markers for levels where buy or sell volume significantly exceeds adjacent levels.
  */
 export declare function drawImbalanceMarkers(ctx: CanvasRenderingContext2D, rows: any[], leftX: number, rightX: number, scales: Scales, theme: any): void;
@@ -28,7 +37,7 @@ export declare function drawValueAreaBoundaries(ctx: CanvasRenderingContext2D, c
 /**
  * Draws the delta (buy - sell) and total volume labels below the footprint.
  */
-export declare function drawDeltaTotalLabels(ctx: CanvasRenderingContext2D, cx: number, maxRow: number, totBuy: number, totSell: number, totalVol: number, scales: Scales, theme: any, zoomX: number): void;
+export declare function drawDeltaTotalLabels(ctx: CanvasRenderingContext2D, cx: number, maxRow: number, totBuy: number, totSell: number, totalVol: number, scales: Scales, theme: any, zoomX: number, slotCenter?: number): void;
 /**
  * Draws the traditional candlestick wick (high/low line) and body (open/close rectangle).
  */
@@ -36,4 +45,4 @@ export declare function drawCandleWickAndBody(ctx: CanvasRenderingContext2D, cx:
 /**
  * Main footprint drawing function that orchestrates all footprint-related rendering.
  */
-export declare function drawFootprint(ctx: CanvasRenderingContext2D, candle: CandleData, i: number, startIndex: number, scales: Scales, theme: any, view: any, showVolumeFootprint: boolean, showDeltaTable?: boolean): void;
+export declare function drawFootprint(ctx: CanvasRenderingContext2D, candle: CandleData, i: number, startIndex: number, scales: Scales, theme: any, view: any, showVolumeFootprint: boolean, showDeltaTable?: boolean, footprintStyle?: 'bid_ask' | 'delta'): void;

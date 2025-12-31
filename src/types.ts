@@ -141,6 +141,8 @@ export interface VFCOptions {
   };
   /** Custom color theme for the chart */
   theme?: VFCTheme;
+  /** Style of footprint visualization: 'bid_ask' (default) or 'delta' */
+  footprintStyle?: 'bid_ask' | 'delta';
   /** Whether to show the Cumulative Volume Delta (CVD) indicator. Default: false */
   showCVD?: boolean;
   /** Height ratio for the CVD pane (0 to 1). Default: 0.2 */

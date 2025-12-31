@@ -55,6 +55,98 @@ export function drawFootprintBoxes(
 }
 
 /**
+ * Draws the footprint with delta bars (Delta Volume mode).
+ */
+export function drawDeltaFootprintBoxes(
+  ctx: CanvasRenderingContext2D,
+  rows: any[],
+  leftX: number,
+  rightX: number,
+  scales: Scales,
+  theme: any,
+  zoomX: number
+): { minRow: number, maxRow: number, totBuy: number, totSell: number } {
+  const maxTotalVol = Math.max(...rows.map(f => f.buy + f.sell), 1);
+  // Calculate max abs delta for color intensity
+  const maxAbsDelta = Math.max(...rows.map(f => Math.abs(f.buy - f.sell)), 1);
+
+  // Available width for the bar (right side of candle)
+  const barMaxWidth = scales.scaledBox(); // Use the standard box width as max width
+
+  let minRow = Infinity, maxRow = -Infinity;
+  let totBuy = 0, totSell = 0;
+
+  for (let r = 0; r < rows.length; r++) {
+    const f = rows[r];
+    const row = scales.priceToRowIndex(f.price);
+    const yTop = scales.rowToY(row - 0.5);
+    const yBot = scales.rowToY(row + 0.5);
+    const h = Math.max(1, yBot - yTop);
+    minRow = Math.min(minRow, row - 0.5);
+    maxRow = Math.max(maxRow, row + 0.5);
+    totBuy += f.buy;
+    totSell += f.sell;
+
+    const total = f.buy + f.sell;
+    const delta = f.buy - f.sell;
+
+    // Only draw if visible
+    const margin = scales.getMargin();
+    const chartBottom = margin.top + scales.chartHeight();
+
+    if (yTop >= margin.top && yBot <= chartBottom) {
+      // Calculate bar width based on Total Volume relative to max in this candle
+      // Available width is effectively the whole slot minus margin/wick
+      // But scaledBox() returns the width of ONE SIDE (approx 55px).
+      // We want to use the full available width on the right of the wick.
+      // Wick is at leftX + scaledCandle()/2.
+      // Space extends to leftX + scaledCandle()/2 + scaledBox().
+      const barWidth = (total / maxTotalVol) * barMaxWidth;
+
+      // Color based on Delta
+      const isPos = delta >= 0;
+      const color = isPos ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
+
+      // Opacity based on Delta magnitude relative to max delta
+      // Base opacity 0.3, max 1.0
+      const opacity = 0.3 + 0.7 * (Math.abs(delta) / maxAbsDelta);
+
+      ctx.fillStyle = color;
+      ctx.globalAlpha = opacity;
+
+      // Draw main bar on the right side
+      // rightX is the right edge of the candle body
+      ctx.fillRect(rightX, yTop, barWidth, h);
+
+      ctx.globalAlpha = 1.0; // Reset alpha
+
+      // Draw Delta Value Text
+      if (scales.shouldShowCellText()) {
+        const fontSize = Math.max(8, Math.min(16, 11 * zoomX));
+        ctx.font = `${fontSize}px system-ui`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = theme.textColorBright || '#ddd';
+
+        // Draw text slightly inside or outside depending on width? 
+        // Request said: "show only the delta on the right side of each candle, with bars"
+        // Let's put text just to the right of the bar start, or centered in bar if wide enough?
+        // Standard approach: Text overlaying the bar
+        if (barWidth > 20) {
+          ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
+        } else {
+          // If bar is too small, maybe draw outside? Or just draw anyway?
+          // Let's draw it anyway, usually fine.
+          ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
+        }
+      }
+    }
+  }
+
+  return { minRow, maxRow, totBuy, totSell };
+}
+
+/**
  * Draws imbalance markers for levels where buy or sell volume significantly exceeds adjacent levels.
  */
 export function drawImbalanceMarkers(
@@ -171,19 +263,22 @@ export function drawDeltaTotalLabels(
   totalVol: number,
   scales: Scales,
   theme: any,
-  zoomX: number
+  zoomX: number,
+  slotCenter?: number
 ): void {
   const yLowFootprint = scales.rowToY(maxRow) + 2;
   const delta = totBuy - totSell;
   const deltaPercent = totalVol > 0 ? (delta / totalVol) * 100 : 0;
   const deltaFontSize = Math.max(8, Math.min(18, 12 * zoomX));
+  const xPos = slotCenter !== undefined ? slotCenter : cx;
+
   ctx.textAlign = 'center';
   ctx.font = `${deltaFontSize}px system-ui`;
   ctx.fillStyle = delta >= 0 ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
-  ctx.fillText(`Delta ${scales.formatK(delta)}`, cx, yLowFootprint + 14);
-  ctx.fillText(`${deltaPercent >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%`, cx, yLowFootprint + 28);
+  ctx.fillText(`Delta ${scales.formatK(delta)}`, xPos, yLowFootprint + 14);
+  ctx.fillText(`${deltaPercent >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%`, xPos, yLowFootprint + 28);
   ctx.fillStyle = theme.totalColor || '#fff';
-  ctx.fillText(`Total ${scales.formatK(totalVol)}`, cx, yLowFootprint + 46);
+  ctx.fillText(`Total ${scales.formatK(totalVol)}`, xPos, yLowFootprint + 46);
 }
 
 /**
@@ -224,39 +319,66 @@ export function drawFootprint(
   theme: any,
   view: any,
   showVolumeFootprint: boolean,
-  showDeltaTable: boolean = false
+  showDeltaTable: boolean = false,
+  footprintStyle: 'bid_ask' | 'delta' = 'bid_ask'
 ): void {
   const cx = scales.indexToX(i, startIndex);
   const half = scales.scaledCandle() / 2;
 
   if (showVolumeFootprint) {
     const rows = candle.footprint.slice().sort((a, b) => b.price - a.price);
-    const enableProfile = rows.length > 3;
+
+    // For delta style, we don't necessarily need profile logic (VAH/VAL/POC) explicitly for coloring,
+    // but we might want POC calculation if we were to highlight it. 
+    // The request didn't specify POC highlighting for Delta style, but let's keep it consistent if needed.
+    // For now, let's stick to the specific request for Delta style.
 
     const { pocIdx, vahIdx, valIdx, VAH, VAL, totalVol } = computeVolumeArea(rows);
 
     const leftX = cx - half - scales.scaledBox();
     const rightX = cx + half;
 
-    // Draw footprint boxes and calculate totals
-    const { minRow, maxRow, totBuy, totSell } = drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme);
+    let stats;
 
-    // Draw imbalance markers
-    drawImbalanceMarkers(ctx, rows, leftX, rightX, scales, theme);
+    if (footprintStyle === 'delta') {
+      // Delta Style Rendering
+      // We only use the right side for bars. 
+      // leftX is usually where Sell volume is. available space is scales.scaledBox().
+      // We can use the space from rightX onwards.
+      // Note: Standard footprint allocates space on LEFT and RIGHT of candle.
+      // If we only draw on RIGHT, we might want to respect the grid columns.
+      // The 'scaledBox' is the width of one side (Bid or Ask). 
+      // So total width allocated per candle is candle + 2 * box.
 
-    // Draw volume numbers
-    if (scales.shouldShowCellText()) {
-      drawVolumeNumbers(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme, view.zoomX);
+      stats = drawDeltaFootprintBoxes(ctx, rows, leftX, rightX, scales, theme, view.zoomX);
+
+    } else {
+      // Standard Bid/Ask Style
+      const enableProfile = rows.length > 3;
+
+      // Draw footprint boxes and calculate totals
+      stats = drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme);
+
+      // Draw imbalance markers
+      drawImbalanceMarkers(ctx, rows, leftX, rightX, scales, theme);
+
+      // Draw volume numbers
+      if (scales.shouldShowCellText()) {
+        drawVolumeNumbers(ctx, rows, pocIdx, enableProfile, leftX, rightX, scales, theme, view.zoomX);
+      }
+
+      // Draw VAH/VAL boundaries and labels
+      if (enableProfile && scales.shouldShowCellText()) {
+        drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, view.zoomX);
+      }
     }
 
-    // Draw VAH/VAL boundaries and labels
-    if (enableProfile && scales.shouldShowCellText()) {
-      drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, view.zoomX);
-    }
+    const { minRow, maxRow, totBuy, totSell } = stats;
 
     // Draw delta and total volume labels (skip if showing in table instead)
     if (scales.shouldShowCellText() && !showDeltaTable) {
-      drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, view.zoomX);
+      const slotCenter = scales.getSlotCenter(i, startIndex);
+      drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, view.zoomX, slotCenter);
     }
   }
 

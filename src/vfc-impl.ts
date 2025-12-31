@@ -73,7 +73,8 @@ export class VFC {
         poc: true,
         hlRange: true
       },
-      tableRowHeight: options.tableRowHeight || 16
+      tableRowHeight: options.tableRowHeight || 16,
+      footprintStyle: options.footprintStyle || 'bid_ask'
     };
 
     this.events = events;

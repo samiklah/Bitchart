@@ -43,6 +43,7 @@ export class Drawing {
     hlRange?: boolean;
   } = {};
   private tableRowHeight: number = 16;
+  private footprintStyle: 'bid_ask' | 'delta' = 'bid_ask';
 
   public updateCVD(values: number[]) {
     this.cvdValues = values;
@@ -66,7 +67,8 @@ export class Drawing {
     cvdValues: number[] = [],
     showDeltaTable: boolean = false,
     tableRowVisibility: typeof Drawing.prototype.tableRowVisibility = {},
-    tableRowHeight: number = 16
+    tableRowHeight: number = 16,
+    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask'
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -86,6 +88,7 @@ export class Drawing {
     this.showDeltaTable = showDeltaTable;
     this.tableRowVisibility = tableRowVisibility;
     this.tableRowHeight = tableRowHeight;
+    this.footprintStyle = footprintStyle;
   }
 
   public setShowDeltaTable(show: boolean) {
@@ -321,7 +324,7 @@ export class Drawing {
 
     const vr = this.scales.getVisibleRange();
     for (let i = vr.startIndex; i < vr.endIndex; i++) {
-      drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint, this.showDeltaTable);
+      drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint, this.showDeltaTable, this.footprintStyle);
     }
     this.ctx.restore();
   }

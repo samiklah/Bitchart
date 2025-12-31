@@ -23,6 +23,7 @@ export declare class Drawing {
     private showDeltaTable;
     private tableRowVisibility;
     private tableRowHeight;
+    private footprintStyle;
     updateCVD(values: number[]): void;
     constructor(ctx: CanvasRenderingContext2D, data: CandleData[], margin: {
         top: number;
@@ -38,7 +39,7 @@ export declare class Drawing {
         x: number;
         y: number;
         visible: boolean;
-    }, lastPrice: number | null, interactions: any, cvdValues?: number[], showDeltaTable?: boolean, tableRowVisibility?: typeof Drawing.prototype.tableRowVisibility, tableRowHeight?: number);
+    }, lastPrice: number | null, interactions: any, cvdValues?: number[], showDeltaTable?: boolean, tableRowVisibility?: typeof Drawing.prototype.tableRowVisibility, tableRowHeight?: number, footprintStyle?: 'bid_ask' | 'delta');
     setShowDeltaTable(show: boolean): void;
     getShowDeltaTable(): boolean;
     drawAll(): void;

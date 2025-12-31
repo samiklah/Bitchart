@@ -23,6 +23,7 @@ export class Scales {
   private showCVD: boolean;
   private cvdHeightRatio: number;
   private deltaTableHeight: number;
+  private footprintStyle: 'bid_ask' | 'delta';
 
   // Cached ladderTop to prevent recalculation on every access
   private cachedLadderTop: number = 10000;
@@ -54,7 +55,8 @@ export class Scales {
     TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number },
     showCVD: boolean = false,
     cvdHeightRatio: number = 0.2,
-    deltaTableHeight: number = 0
+    deltaTableHeight: number = 0,
+    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask'
   ) {
     this.data = data;
     this.margin = margin;
@@ -68,6 +70,7 @@ export class Scales {
     this.showCVD = showCVD;
     this.cvdHeightRatio = cvdHeightRatio;
     this.deltaTableHeight = deltaTableHeight;
+    this.footprintStyle = footprintStyle;
   }
 
   /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
@@ -122,7 +125,12 @@ export class Scales {
     if (!this.showVolumeFootprint) {
       return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
     }
-    return 132 * this.view.zoomX; // Reduced spacing for closer candle layout
+    if (this.footprintStyle === 'delta') {
+      // Reduced spacing for delta mode (only right-side bars)
+      // BASE_CANDLE (15) + BASE_BOX (55) + GAP (~5-10)
+      return 75 * this.view.zoomX;
+    }
+    return 132 * this.view.zoomX; // Standard spacing (Candle + 2 * Box + gaps)
   }
 
   scaledCandle(): number {
@@ -161,7 +169,23 @@ export class Scales {
     return this.rowToY(this.priceToRowIndex(price));
   }
 
+  /** Returns the offset of the candle wick (center) from the start of the candle's slot. */
+  private wickOffset(): number {
+    if (this.footprintStyle === 'delta') {
+      // Shift left: half candle width + small gap
+      return this.scaledCandle() / 2 + 2;
+    }
+    // Centered in slot
+    return this.scaledSpacing() / 2;
+  }
+
   indexToX(i: number, startIndex: number): number {
+    const s = this.scaledSpacing();
+    return this.margin.left + (i - startIndex) * s + this.wickOffset() - this.xShift;
+  }
+
+  /** Returns the geometric center of the column/slot. ideal for text alignment. */
+  getSlotCenter(i: number, startIndex: number): number {
     const s = this.scaledSpacing();
     return this.margin.left + (i - startIndex) * s + s / 2 - this.xShift;
   }
@@ -215,7 +239,9 @@ export class Scales {
   screenXToDataIndex(screenX: number): number {
     const vr = this.getVisibleRange();
     const s = this.scaledSpacing();
-    const relativeX = screenX - this.margin.left + this.xShift - s / 2;
+    // Reverse the calculation: x = margin + relative_i * s + wickOffset - xShift
+    // relative_i * s = x - margin - wickOffset + xShift
+    const relativeX = screenX - this.margin.left + this.xShift - this.wickOffset();
     return vr.startIndex + Math.floor(relativeX / s);
   }
 
@@ -223,7 +249,7 @@ export class Scales {
   screenXToExactDataIndex(screenX: number): number {
     const vr = this.getVisibleRange();
     const s = this.scaledSpacing();
-    const relativeX = screenX - this.margin.left + this.xShift - s / 2;
+    const relativeX = screenX - this.margin.left + this.xShift - this.wickOffset();
     return vr.startIndex + relativeX / s;
   }
 

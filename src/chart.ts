@@ -31,7 +31,7 @@ export class Chart {
   // Toolbar button references
   private resetZoomBtn: HTMLButtonElement | null = null;
   private toggleGridBtn: HTMLButtonElement | null = null;
-  private toggleVolumeFootprintBtn: HTMLButtonElement | null = null;
+  private viewModeSelect: HTMLSelectElement | null = null;
   private volumeHeatmapBtn: HTMLButtonElement | null = null;
   private volumeHeatmapDropdown: HTMLDivElement | null = null;
   private measureBtn: HTMLButtonElement | null = null;
@@ -140,11 +140,25 @@ export class Chart {
     topToolbar.appendChild(toggleGridBtn);
 
 
-    const toggleVolumeFootprintBtn = document.createElement('button');
-    toggleVolumeFootprintBtn.id = 'toggleVolumeFootprint';
-    toggleVolumeFootprintBtn.className = 'tool-btn';
-    toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
-    topToolbar.appendChild(toggleVolumeFootprintBtn);
+    const viewModeSelect = document.createElement('select');
+    viewModeSelect.id = 'viewModeSelect';
+    viewModeSelect.className = 'tool-select';
+
+    // Add options
+    const modes = [
+      { value: 'candles', label: 'Candles' },
+      { value: 'bid_ask', label: 'Bid/Ask Footprint' },
+      { value: 'delta', label: 'Delta Footprint' }
+    ];
+
+    modes.forEach(mode => {
+      const option = document.createElement('option');
+      option.value = mode.value;
+      option.text = mode.label;
+      viewModeSelect.appendChild(option);
+    });
+
+    topToolbar.appendChild(viewModeSelect);
 
     // Create volume heatmap toggle button (simple on/off - type set in edit popup)
     const volumeHeatmapBtn = document.createElement('button');
@@ -295,6 +309,27 @@ export class Chart {
     });
     editPopup.appendChild(cvdSection);
 
+    // Footprint Style Section
+    const fpSection = document.createElement('div');
+    fpSection.style.marginTop = '12px';
+    fpSection.style.borderTop = '1px solid #444';
+    fpSection.style.paddingTop = '12px';
+    fpSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Footprint Style</div>';
+    [{ value: 'bid_ask', label: 'Bid/Ask' }, { value: 'delta', label: 'Delta Volume' }].forEach(opt => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'footprintStyle';
+      radio.value = opt.value;
+      radio.checked = opt.value === 'bid_ask';
+      radio.style.marginRight = '8px';
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(opt.label));
+      fpSection.appendChild(label);
+    });
+    editPopup.appendChild(fpSection);
+
     editContainer.appendChild(editPopup);
     topToolbar.appendChild(editContainer);
 
@@ -317,7 +352,7 @@ export class Chart {
   private setupToolbarEventHandlers(container: HTMLElement): void {
     const resetZoomBtn = container.querySelector('#resetZoom') as HTMLButtonElement;
     const toggleGridBtn = container.querySelector('#toggleGrid') as HTMLButtonElement;
-    const toggleVolumeFootprintBtn = container.querySelector('#toggleVolumeFootprint') as HTMLButtonElement;
+    const viewModeSelect = container.querySelector('#viewModeSelect') as HTMLSelectElement;
     const volumeHeatmapBtn = container.querySelector('#volumeHeatmap') as HTMLButtonElement;
     const volumeHeatmapDropdown = container.querySelector('.dropdown-menu:not(.cvd-dropdown)') as HTMLDivElement;
     const measureBtn = container.querySelector('#measure') as HTMLButtonElement;
@@ -327,7 +362,7 @@ export class Chart {
     // Store references for later use
     this.resetZoomBtn = resetZoomBtn;
     this.toggleGridBtn = toggleGridBtn;
-    this.toggleVolumeFootprintBtn = toggleVolumeFootprintBtn;
+    this.viewModeSelect = viewModeSelect;
     this.volumeHeatmapBtn = volumeHeatmapBtn;
     this.volumeHeatmapDropdown = volumeHeatmapDropdown;
     this.measureBtn = measureBtn;
@@ -412,7 +447,8 @@ export class Chart {
         poc: true,
         hlRange: true
       },
-      tableRowHeight: options.tableRowHeight || 16
+      tableRowHeight: options.tableRowHeight || 16,
+      footprintStyle: options.footprintStyle || 'bid_ask'
     };
 
     this.margin = this.options.margin;
@@ -444,7 +480,8 @@ export class Chart {
       this.TEXT_VIS,
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
-      this.getDeltaTableHeight()
+      this.getDeltaTableHeight(),
+      this.options.footprintStyle
     );
 
     this.interactions = new Interactions(
@@ -499,7 +536,8 @@ export class Chart {
       this.cvdValues,
       this.showDeltaTable,
       this.options.tableRowVisibility,
-      this.options.tableRowHeight ?? 16
+      this.options.tableRowHeight ?? 16,
+      this.options.footprintStyle
     );
   }
 
@@ -579,11 +617,17 @@ export class Chart {
       });
     }
 
-    if (this.toggleVolumeFootprintBtn) {
-      this.toggleVolumeFootprintBtn.addEventListener('click', () => {
-        this.updateOptions({
-          showVolumeFootprint: !this.options.showVolumeFootprint
-        });
+    if (this.viewModeSelect) {
+      this.viewModeSelect.addEventListener('change', () => {
+        const mode = this.viewModeSelect!.value;
+        if (mode === 'candles') {
+          this.updateOptions({ showVolumeFootprint: false });
+        } else {
+          this.updateOptions({
+            showVolumeFootprint: true,
+            footprintStyle: mode as 'bid_ask' | 'delta'
+          });
+        }
       });
     }
 
@@ -694,6 +738,16 @@ export class Chart {
         });
       });
 
+      // Footprint Style radio handlers
+      this.editPopup.querySelectorAll('input[name="footprintStyle"]').forEach(radio => {
+        const r = radio as HTMLInputElement;
+        r.addEventListener('change', () => {
+          const footprintStyle = r.value as 'bid_ask' | 'delta';
+          this.options.footprintStyle = footprintStyle;
+          this.updateOptions({ footprintStyle });
+        });
+      });
+
       // Close popup when clicking outside
       document.addEventListener('click', (e) => {
         if (!this.editBtn?.contains(e.target as Node) &&
@@ -733,7 +787,8 @@ export class Chart {
       this.TEXT_VIS,
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
-      this.getDeltaTableHeight()
+      this.getDeltaTableHeight(),
+      this.options.footprintStyle
     );
 
     this.drawing = new Drawing(
@@ -754,7 +809,8 @@ export class Chart {
       this.cvdValues,
       this.showDeltaTable,
       this.options.tableRowVisibility,
-      this.options.tableRowHeight ?? 16
+      this.options.tableRowHeight ?? 16,
+      this.options.footprintStyle
     );
 
     this.setupCanvas();
@@ -808,7 +864,8 @@ export class Chart {
       this.TEXT_VIS,
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
-      this.getDeltaTableHeight()
+      this.getDeltaTableHeight(),
+      this.options.footprintStyle
     );
 
     // Invalidate ladderTop cache when tick size changes
@@ -857,7 +914,8 @@ export class Chart {
       this.cvdValues,
       this.showDeltaTable,
       this.options.tableRowVisibility,
-      this.options.tableRowHeight ?? 16
+      this.options.tableRowHeight ?? 16,
+      this.options.footprintStyle
     );
 
     this.drawing.drawAll();
@@ -911,7 +969,8 @@ export class Chart {
       this.TEXT_VIS,
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
-      this.getDeltaTableHeight()
+      this.getDeltaTableHeight(),
+      this.options.footprintStyle
     );
 
     // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
@@ -940,7 +999,8 @@ export class Chart {
       this.cvdValues,
       this.showDeltaTable,
       this.options.tableRowVisibility,
-      this.options.tableRowHeight ?? 16
+      this.options.tableRowHeight ?? 16,
+      this.options.footprintStyle
     );
 
     this.layout();
@@ -1106,7 +1166,8 @@ export class Chart {
       this.TEXT_VIS,
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
-      this.getDeltaTableHeight()
+      this.getDeltaTableHeight(),
+      this.options.footprintStyle
     );
 
     this.drawing = new Drawing(
@@ -1134,6 +1195,13 @@ export class Chart {
   }
 
   private updateButtonText() {
+    if (this.viewModeSelect) {
+      if (!this.options.showVolumeFootprint) {
+        this.viewModeSelect.value = 'candles';
+      } else {
+        this.viewModeSelect.value = this.options.footprintStyle || 'bid_ask';
+      }
+    }
     if (this.volumeHeatmapBtn) {
       if (this.options.showVolumeHeatmap) {
         const mode = this.options.volumeHeatmapDynamic ? 'Dynamic' : 'Static';

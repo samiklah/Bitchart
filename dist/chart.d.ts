@@ -22,7 +22,7 @@ export declare class Chart {
     private cvdType;
     private resetZoomBtn;
     private toggleGridBtn;
-    private toggleVolumeFootprintBtn;
+    private viewModeSelect;
     private volumeHeatmapBtn;
     private volumeHeatmapDropdown;
     private measureBtn;
