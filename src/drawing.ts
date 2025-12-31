@@ -27,6 +27,22 @@ export class Drawing {
   private lastPrice: number | null;
   private interactions: any;
   private cvdValues: number[] = [];
+  private showDeltaTable: boolean = false;
+  private tableRowVisibility: {
+    volume?: boolean;
+    volChange?: boolean;
+    buyVol?: boolean;
+    buyVolPercent?: boolean;
+    sellVol?: boolean;
+    sellVolPercent?: boolean;
+    delta?: boolean;
+    deltaPercent?: boolean;
+    minDelta?: boolean;
+    maxDelta?: boolean;
+    poc?: boolean;
+    hlRange?: boolean;
+  } = {};
+  private tableRowHeight: number = 16;
 
   public updateCVD(values: number[]) {
     this.cvdValues = values;
@@ -47,7 +63,10 @@ export class Drawing {
     crosshair: { x: number; y: number; visible: boolean },
     lastPrice: number | null,
     interactions: any,
-    cvdValues: number[] = []
+    cvdValues: number[] = [],
+    showDeltaTable: boolean = false,
+    tableRowVisibility: typeof Drawing.prototype.tableRowVisibility = {},
+    tableRowHeight: number = 16
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -64,6 +83,17 @@ export class Drawing {
     this.lastPrice = lastPrice;
     this.interactions = interactions;
     this.cvdValues = cvdValues;
+    this.showDeltaTable = showDeltaTable;
+    this.tableRowVisibility = tableRowVisibility;
+    this.tableRowHeight = tableRowHeight;
+  }
+
+  public setShowDeltaTable(show: boolean) {
+    this.showDeltaTable = show;
+  }
+
+  public getShowDeltaTable(): boolean {
+    return this.showDeltaTable;
   }
 
   drawAll(): void {
@@ -74,11 +104,207 @@ export class Drawing {
     if (this.showVolumeHeatmap) this.drawVolumeHeatmap();
     this.drawChart();
     if (this.scales.cvdHeight() > 0) this.drawCVD();
+    if (this.showDeltaTable) this.drawDeltaTable();
     drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
     this.drawScales(width, height);
     drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
     if (this.crosshair.visible) drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
     if (this.showBounds) drawBounds(this.ctx, width, height, this.margin, this.scales);
+  }
+
+  private drawDeltaTable(): void {
+    const vr = this.scales.getVisibleRange();
+    if (vr.endIndex <= vr.startIndex) return;
+
+    const ctx = this.ctx;
+    const width = ctx.canvas.width / window.devicePixelRatio;
+    const height = ctx.canvas.height / window.devicePixelRatio;
+
+    // Define row configurations with visibility keys
+    const rowHeight = this.tableRowHeight;
+    const allRows = [
+      { key: 'volume' as const, label: 'Volume' },
+      { key: 'volChange' as const, label: 'Vol Change %' },
+      { key: 'buyVol' as const, label: 'Buy Volume' },
+      { key: 'buyVolPercent' as const, label: 'Buy Vol %' },
+      { key: 'sellVol' as const, label: 'Sell Volume' },
+      { key: 'sellVolPercent' as const, label: 'Sell Vol %' },
+      { key: 'delta' as const, label: 'Delta' },
+      { key: 'deltaPercent' as const, label: 'Delta %' },
+      { key: 'minDelta' as const, label: 'Min Delta' },
+      { key: 'maxDelta' as const, label: 'Max Delta' },
+      { key: 'poc' as const, label: 'POC' },
+      { key: 'hlRange' as const, label: 'HL Range' }
+    ];
+
+    // Filter to only visible rows
+    const visibleRows = allRows.filter(row => this.tableRowVisibility[row.key] !== false);
+    const numRows = visibleRows.length;
+    if (numRows === 0) return;
+
+    const tableHeight = rowHeight * numRows;
+    // Position table at the very bottom, just above the timeline
+    const tableY = height - this.margin.bottom - tableHeight;
+
+    // Draw table background with dark color to match chart theme
+    ctx.save();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, tableY, width, tableHeight);
+
+    // Draw horizontal grid lines
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 0.5;
+    for (let r = 0; r <= numRows; r++) {
+      ctx.beginPath();
+      ctx.moveTo(0, tableY + r * rowHeight);
+      ctx.lineTo(width, tableY + r * rowHeight);
+      ctx.stroke();
+    }
+
+    // Calculate previous candle volume for volume change %
+    let prevVol = 0;
+
+    // Draw values for each visible candle
+    for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
+      const candle = this.data[i];
+      const cx = this.scales.indexToX(i, vr.startIndex);
+
+      // Calculate totals
+      // Calculate totals and min/max delta
+      let totBuy = 0, totSell = 0;
+      let minDelta = Number.MAX_SAFE_INTEGER;
+      let maxDelta = Number.MIN_SAFE_INTEGER;
+      let poc = 0, pocVol = 0;
+      const hasFootprint = candle.footprint.length > 0;
+
+      if (!hasFootprint) {
+        minDelta = 0;
+        maxDelta = 0;
+      }
+
+      for (const level of candle.footprint) {
+        totBuy += level.buy;
+        totSell += level.sell;
+        const levelDelta = level.buy - level.sell;
+        minDelta = Math.min(minDelta, levelDelta);
+        maxDelta = Math.max(maxDelta, levelDelta);
+        const levelVol = level.buy + level.sell;
+        if (levelVol > pocVol) {
+          pocVol = levelVol;
+          poc = level.price;
+        }
+      }
+
+      const totalVol = totBuy + totSell;
+      const delta = totBuy - totSell;
+      const deltaPercent = totalVol > 0 ? (delta / totalVol) * 100 : 0;
+      const buyPercent = totalVol > 0 ? (totBuy / totalVol) * 100 : 0;
+      const sellPercent = totalVol > 0 ? (totSell / totalVol) * 100 : 0;
+      const volChange = prevVol > 0 ? ((totalVol - prevVol) / prevVol) * 100 : 0;
+      const hlRange = candle.high - candle.low;
+
+      // Calculate cell width - full spacing with no gaps
+      const cellWidth = this.scales.scaledSpacing();
+      const cellX = cx - cellWidth / 2;
+
+      // Only show text if cell is wide enough (at least 30px)
+      const showText = cellWidth >= 30;
+
+      ctx.textAlign = 'center';
+      // Dynamic font size based on row height, min 9px, max 14px
+      const fontSize = Math.min(14, Math.max(9, Math.floor(rowHeight * 0.7)));
+      ctx.font = `${fontSize}px system-ui`;
+
+      // Draw each visible row dynamically
+      for (let r = 0; r < visibleRows.length; r++) {
+        const row = visibleRows[r];
+        const rowY = tableY + r * rowHeight;
+
+        let bgColor = '#2a2a2a'; // default neutral
+        let textValue = '';
+
+        switch (row.key) {
+          case 'volume':
+            bgColor = '#2a2a2a';
+            textValue = this.scales.formatK(totalVol);
+            break;
+          case 'volChange':
+            bgColor = i === vr.startIndex ? '#2a2a2a' : (volChange >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)');
+            textValue = i === vr.startIndex ? '-' : `${volChange.toFixed(1)}%`;
+            break;
+          case 'buyVol':
+            bgColor = 'rgba(22, 163, 74, 0.5)';
+            textValue = this.scales.formatK(totBuy);
+            break;
+          case 'buyVolPercent':
+            bgColor = 'rgba(22, 163, 74, 0.5)';
+            textValue = `${buyPercent.toFixed(1)}%`;
+            break;
+          case 'sellVol':
+            bgColor = 'rgba(220, 38, 38, 0.5)';
+            textValue = this.scales.formatK(totSell);
+            break;
+          case 'sellVolPercent':
+            bgColor = 'rgba(220, 38, 38, 0.5)';
+            textValue = `${sellPercent.toFixed(1)}%`;
+            break;
+          case 'delta':
+            bgColor = delta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+            textValue = this.scales.formatK(delta);
+            break;
+          case 'deltaPercent':
+            bgColor = deltaPercent >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+            textValue = `${deltaPercent.toFixed(1)}%`;
+            break;
+          case 'minDelta':
+            bgColor = minDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+            textValue = this.scales.formatK(minDelta);
+            break;
+          case 'maxDelta':
+            bgColor = maxDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+            textValue = this.scales.formatK(maxDelta);
+            break;
+          case 'poc':
+            bgColor = '#2a2a2a';
+            textValue = poc.toFixed(2);
+            break;
+          case 'hlRange':
+            bgColor = '#2a2a2a';
+            textValue = hlRange.toFixed(4);
+            break;
+        }
+
+        // Draw background
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(cellX, rowY, cellWidth, rowHeight - 1);
+
+        // Draw text if wide enough
+        if (showText) {
+          ctx.fillStyle = '#fff';
+          ctx.fillText(textValue, cx, rowY + rowHeight / 2);
+        }
+      }
+
+      prevVol = totalVol;
+    }
+
+    // Draw label column background (over cells on the left)
+    const labelWidth = 75;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, tableY, labelWidth, tableHeight);
+
+    // Draw row labels on the left (after cells so they're on top)
+    ctx.fillStyle = '#888';
+    // Dynamic font size for labels, max 14px
+    const labelFontSize = Math.min(14, Math.max(9, Math.floor(rowHeight * 0.6)));
+    ctx.font = `${labelFontSize}px system-ui`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (let r = 0; r < numRows; r++) {
+      ctx.fillText(visibleRows[r].label, 5, tableY + r * rowHeight + rowHeight / 2);
+    }
+
+    ctx.restore();
   }
 
   private drawChart(): void {
@@ -95,7 +321,7 @@ export class Drawing {
 
     const vr = this.scales.getVisibleRange();
     for (let i = vr.startIndex; i < vr.endIndex; i++) {
-      drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint);
+      drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint, this.showDeltaTable);
     }
     this.ctx.restore();
   }

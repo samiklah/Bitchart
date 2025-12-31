@@ -19,6 +19,7 @@ export declare class Interactions {
     private scales;
     private isDraggingCvdDivider;
     private cvdDividerHitZone;
+    private isDraggingTableDivider;
     private isMeasureMode;
     private measureRectangle;
     /**
@@ -62,6 +63,7 @@ export declare class Interactions {
     /** Updates the scales reference when options change */
     setScales(scales: Scales): void;
     private handleCvdDividerDrag;
+    private handleTableDividerDrag;
     private cancelMomentum;
     private startMomentum;
     private stepMomentum;

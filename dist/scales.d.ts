@@ -19,6 +19,7 @@ export declare class Scales {
     private TEXT_VIS;
     private showCVD;
     private cvdHeightRatio;
+    private deltaTableHeight;
     private cachedLadderTop;
     private ladderTopDirty;
     /**
@@ -49,11 +50,13 @@ export declare class Scales {
         minZoomX: number;
         minRowPx: number;
         minBoxPx: number;
-    }, showCVD?: boolean, cvdHeightRatio?: number);
+    }, showCVD?: boolean, cvdHeightRatio?: number, deltaTableHeight?: number);
     /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
     chartHeight(): number;
     /** Returns the height of the CVD pane. */
     cvdHeight(): number;
+    /** Returns the height of the delta table. */
+    getDeltaTableHeight(): number;
     /** Returns the Y coordinate where the CVD pane starts. */
     cvdOriginY(): number;
     /** Maps a CVD value to a Y coordinate within the CVD pane. */

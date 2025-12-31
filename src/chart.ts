@@ -51,6 +51,14 @@ export class Chart {
   private cvdBaseline: 'global' | 'session' | 'visible' = 'global';
   private cvdNormalize = true;
 
+  // Delta table state
+  private showDeltaTable = false;
+  private deltaTableBtn: HTMLButtonElement | null = null;
+
+  // Edit settings popup state
+  private editBtn: HTMLButtonElement | null = null;
+  private editPopup: HTMLDivElement | null = null;
+
   // Constants
   private TICK: number = 10;
 
@@ -138,86 +146,13 @@ export class Chart {
     toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
     topToolbar.appendChild(toggleVolumeFootprintBtn);
 
-    // Create volume heatmap dropdown container
-    const volumeHeatmapContainer = document.createElement('div');
-    volumeHeatmapContainer.className = 'dropdown-container';
-    volumeHeatmapContainer.style.position = 'relative';
-    volumeHeatmapContainer.style.display = 'inline-block';
-
+    // Create volume heatmap toggle button (simple on/off - type set in edit popup)
     const volumeHeatmapBtn = document.createElement('button');
     volumeHeatmapBtn.id = 'volumeHeatmap';
-    volumeHeatmapBtn.className = 'tool-btn dropdown-btn';
+    volumeHeatmapBtn.className = 'tool-btn';
     volumeHeatmapBtn.textContent = 'Volume Heatmap';
-    volumeHeatmapBtn.title = 'Volume heatmap options';
-    volumeHeatmapContainer.appendChild(volumeHeatmapBtn);
-
-    // Create dropdown menu
-    const dropdown = document.createElement('div');
-    dropdown.className = 'dropdown-menu';
-    dropdown.style.position = 'absolute';
-    dropdown.style.top = '100%';
-    dropdown.style.left = '0';
-    dropdown.style.backgroundColor = '#1a1a1a';
-    dropdown.style.border = '1px solid #444';
-    dropdown.style.borderRadius = '4px';
-    dropdown.style.minWidth = '120px';
-    dropdown.style.zIndex = '1000';
-    dropdown.style.display = 'none';
-    dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-
-    // Dynamic option
-    const dynamicOption = document.createElement('div');
-    dynamicOption.className = 'dropdown-item';
-    dynamicOption.textContent = 'Dynamic';
-    dynamicOption.style.padding = '8px 12px';
-    dynamicOption.style.cursor = 'pointer';
-    dynamicOption.style.color = '#fff';
-    dynamicOption.style.fontSize = '12px';
-    dynamicOption.addEventListener('mouseenter', () => dynamicOption.style.backgroundColor = '#333');
-    dynamicOption.addEventListener('mouseleave', () => dynamicOption.style.backgroundColor = 'transparent');
-    dynamicOption.addEventListener('click', () => {
-      this.updateOptions({ volumeHeatmapDynamic: true, showVolumeHeatmap: true });
-      this.updateButtonText();
-      dropdown.style.display = 'none';
-    });
-    dropdown.appendChild(dynamicOption);
-
-    // Static option
-    const staticOption = document.createElement('div');
-    staticOption.className = 'dropdown-item';
-    staticOption.textContent = 'Static';
-    staticOption.style.padding = '8px 12px';
-    staticOption.style.cursor = 'pointer';
-    staticOption.style.color = '#fff';
-    staticOption.style.fontSize = '12px';
-    staticOption.addEventListener('mouseenter', () => staticOption.style.backgroundColor = '#333');
-    staticOption.addEventListener('mouseleave', () => staticOption.style.backgroundColor = 'transparent');
-    staticOption.addEventListener('click', () => {
-      this.updateOptions({ volumeHeatmapDynamic: false, showVolumeHeatmap: true });
-      this.updateButtonText();
-      dropdown.style.display = 'none';
-    });
-    dropdown.appendChild(staticOption);
-
-    // Off option
-    const offOption = document.createElement('div');
-    offOption.className = 'dropdown-item';
-    offOption.textContent = 'Off';
-    offOption.style.padding = '8px 12px';
-    offOption.style.cursor = 'pointer';
-    offOption.style.color = '#fff';
-    offOption.style.fontSize = '12px';
-    offOption.addEventListener('mouseenter', () => offOption.style.backgroundColor = '#333');
-    offOption.addEventListener('mouseleave', () => offOption.style.backgroundColor = 'transparent');
-    offOption.addEventListener('click', () => {
-      this.updateOptions({ showVolumeHeatmap: false });
-      this.updateButtonText();
-      dropdown.style.display = 'none';
-    });
-    dropdown.appendChild(offOption);
-
-    volumeHeatmapContainer.appendChild(dropdown);
-    topToolbar.appendChild(volumeHeatmapContainer);
+    volumeHeatmapBtn.title = 'Toggle volume heatmap (set type in ⚙️ Settings)';
+    topToolbar.appendChild(volumeHeatmapBtn);
 
 
     const measureBtn = document.createElement('button');
@@ -227,86 +162,13 @@ export class Chart {
     measureBtn.textContent = '📐 Measure';
     topToolbar.appendChild(measureBtn);
 
-    // Create CVD dropdown container
-    const cvdContainer = document.createElement('div');
-    cvdContainer.className = 'dropdown-container';
-    cvdContainer.style.position = 'relative';
-    cvdContainer.style.display = 'inline-block';
-
+    // Create CVD toggle button (simple on/off - type set in edit popup)
     const cvdBtn = document.createElement('button');
     cvdBtn.id = 'cvdToggle';
-    cvdBtn.className = 'tool-btn dropdown-btn';
+    cvdBtn.className = 'tool-btn';
     cvdBtn.textContent = 'CVD';
-    cvdBtn.title = 'Cumulative Volume Delta options';
-    cvdContainer.appendChild(cvdBtn);
-
-    // Create CVD dropdown menu
-    const cvdDropdown = document.createElement('div');
-    cvdDropdown.className = 'dropdown-menu cvd-dropdown';
-    cvdDropdown.style.position = 'absolute';
-    cvdDropdown.style.top = '100%';
-    cvdDropdown.style.left = '0';
-    cvdDropdown.style.backgroundColor = '#1a1a1a';
-    cvdDropdown.style.border = '1px solid #444';
-    cvdDropdown.style.borderRadius = '4px';
-    cvdDropdown.style.minWidth = '140px';
-    cvdDropdown.style.zIndex = '1000';
-    cvdDropdown.style.display = 'none';
-    cvdDropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-
-    // Ticker option
-    const tickerOption = document.createElement('div');
-    tickerOption.className = 'dropdown-item';
-    tickerOption.textContent = 'Ticker (Vol × Sign)';
-    tickerOption.style.padding = '8px 12px';
-    tickerOption.style.cursor = 'pointer';
-    tickerOption.style.color = '#fff';
-    tickerOption.style.fontSize = '12px';
-    tickerOption.addEventListener('mouseenter', () => tickerOption.style.backgroundColor = '#333');
-    tickerOption.addEventListener('mouseleave', () => tickerOption.style.backgroundColor = 'transparent');
-    tickerOption.addEventListener('click', () => {
-      this.updateOptions({ showCVD: true, cvdType: 'ticker' });
-      this.updateButtonText();
-      cvdDropdown.style.display = 'none';
-    });
-    cvdDropdown.appendChild(tickerOption);
-
-    // Footprint option
-    const footprintOption = document.createElement('div');
-    footprintOption.className = 'dropdown-item';
-    footprintOption.textContent = 'Footprint (Buy − Sell)';
-    footprintOption.style.padding = '8px 12px';
-    footprintOption.style.cursor = 'pointer';
-    footprintOption.style.color = '#fff';
-    footprintOption.style.fontSize = '12px';
-    footprintOption.addEventListener('mouseenter', () => footprintOption.style.backgroundColor = '#333');
-    footprintOption.addEventListener('mouseleave', () => footprintOption.style.backgroundColor = 'transparent');
-    footprintOption.addEventListener('click', () => {
-      this.updateOptions({ showCVD: true, cvdType: 'footprint' });
-      this.updateButtonText();
-      cvdDropdown.style.display = 'none';
-    });
-    cvdDropdown.appendChild(footprintOption);
-
-    // Off option
-    const cvdOffOption = document.createElement('div');
-    cvdOffOption.className = 'dropdown-item';
-    cvdOffOption.textContent = 'Off';
-    cvdOffOption.style.padding = '8px 12px';
-    cvdOffOption.style.cursor = 'pointer';
-    cvdOffOption.style.color = '#fff';
-    cvdOffOption.style.fontSize = '12px';
-    cvdOffOption.addEventListener('mouseenter', () => cvdOffOption.style.backgroundColor = '#333');
-    cvdOffOption.addEventListener('mouseleave', () => cvdOffOption.style.backgroundColor = 'transparent');
-    cvdOffOption.addEventListener('click', () => {
-      this.updateOptions({ showCVD: false });
-      this.updateButtonText();
-      cvdDropdown.style.display = 'none';
-    });
-    cvdDropdown.appendChild(cvdOffOption);
-
-    cvdContainer.appendChild(cvdDropdown);
-    topToolbar.appendChild(cvdContainer);
+    cvdBtn.title = 'Toggle CVD (set type in ⚙️ Settings)';
+    topToolbar.appendChild(cvdBtn);
 
     // Create timeframe button group
     const tfContainer = document.createElement('div');
@@ -321,6 +183,120 @@ export class Chart {
       tfContainer.appendChild(btn);
     }
     topToolbar.appendChild(tfContainer);
+
+    // Create Delta Table toggle button
+    const deltaTableBtn = document.createElement('button');
+    deltaTableBtn.id = 'deltaTableToggle';
+    deltaTableBtn.className = 'tool-btn';
+    deltaTableBtn.textContent = 'Table';
+    deltaTableBtn.title = 'Show Delta & Delta% in table below chart';
+    topToolbar.appendChild(deltaTableBtn);
+
+    // Create Edit Settings button and popup
+    const editContainer = document.createElement('div');
+    editContainer.style.position = 'relative';
+    editContainer.style.display = 'inline-block';
+
+    const editBtn = document.createElement('button');
+    editBtn.id = 'editSettings';
+    editBtn.className = 'tool-btn';
+    editBtn.textContent = '⚙️';
+    editBtn.title = 'Edit Chart Settings';
+    editContainer.appendChild(editBtn);
+
+    // Create settings popup
+    const editPopup = document.createElement('div');
+    editPopup.id = 'editSettingsPopup';
+    editPopup.style.cssText = `
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 12px;
+      z-index: 1000;
+      min-width: 220px;
+      color: #fff;
+      font-size: 12px;
+    `;
+
+    // Table Rows Section
+    const tableSection = document.createElement('div');
+    tableSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Table Rows</div>';
+    const tableRows = [
+      { key: 'volume', label: 'Volume' },
+      { key: 'volChange', label: 'Vol Change %' },
+      { key: 'buyVol', label: 'Buy Volume' },
+      { key: 'buyVolPercent', label: 'Buy Vol %' },
+      { key: 'sellVol', label: 'Sell Volume' },
+      { key: 'sellVolPercent', label: 'Sell Vol %' },
+      { key: 'delta', label: 'Delta' },
+      { key: 'deltaPercent', label: 'Delta %' },
+      { key: 'minDelta', label: 'Min Delta' },
+      { key: 'maxDelta', label: 'Max Delta' },
+      { key: 'poc', label: 'POC' },
+      { key: 'hlRange', label: 'HL Range' }
+    ];
+    tableRows.forEach(row => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      checkbox.dataset.row = row.key;
+      checkbox.style.marginRight = '8px';
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(row.label));
+      tableSection.appendChild(label);
+    });
+    editPopup.appendChild(tableSection);
+
+    // Heatmap Type Section
+    const heatmapSection = document.createElement('div');
+    heatmapSection.style.marginTop = '12px';
+    heatmapSection.style.borderTop = '1px solid #444';
+    heatmapSection.style.paddingTop = '12px';
+    heatmapSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Heatmap Type</div>';
+    ['Dynamic', 'Static'].forEach(type => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'heatmapType';
+      radio.value = type.toLowerCase();
+      radio.checked = type === 'Dynamic';
+      radio.style.marginRight = '8px';
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(type));
+      heatmapSection.appendChild(label);
+    });
+    editPopup.appendChild(heatmapSection);
+
+    // CVD Type Section
+    const cvdSection = document.createElement('div');
+    cvdSection.style.marginTop = '12px';
+    cvdSection.style.borderTop = '1px solid #444';
+    cvdSection.style.paddingTop = '12px';
+    cvdSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">CVD Type</div>';
+    [{ value: 'ticker', label: 'Ticker (Vol × Sign)' }, { value: 'footprint', label: 'Footprint (Buy − Sell)' }].forEach(opt => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'cvdType';
+      radio.value = opt.value;
+      radio.checked = opt.value === 'ticker';
+      radio.style.marginRight = '8px';
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(opt.label));
+      cvdSection.appendChild(label);
+    });
+    editPopup.appendChild(cvdSection);
+
+    editContainer.appendChild(editPopup);
+    topToolbar.appendChild(editContainer);
 
     const hint = document.createElement('span');
     hint.className = 'hint';
@@ -366,6 +342,13 @@ export class Chart {
         this.timeframeButtons.set(tf, btn);
       }
     });
+
+    // Store Delta Table button reference
+    this.deltaTableBtn = container.querySelector('#deltaTableToggle') as HTMLButtonElement;
+
+    // Store Edit Settings button and popup references
+    this.editBtn = container.querySelector('#editSettings') as HTMLButtonElement;
+    this.editPopup = container.querySelector('#editSettingsPopup') as HTMLDivElement;
   }
 
   /**
@@ -409,11 +392,27 @@ export class Chart {
       showCVD: options.showCVD ?? false,
       cvdHeightRatio: options.cvdHeightRatio || 0.2,
       cvdType: options.cvdType || 'ticker',
+      showDeltaTable: options.showDeltaTable ?? false,
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 0.55,
       initialZoomY: options.initialZoomY || 0.55,
       margin: options.margin || this.margin,
-      theme: options.theme || {}
+      theme: options.theme || {},
+      tableRowVisibility: options.tableRowVisibility || {
+        volume: true,
+        volChange: true,
+        buyVol: true,
+        buyVolPercent: true,
+        sellVol: true,
+        sellVolPercent: true,
+        delta: true,
+        deltaPercent: true,
+        minDelta: true,
+        maxDelta: true,
+        poc: true,
+        hlRange: true
+      },
+      tableRowHeight: options.tableRowHeight || 16
     };
 
     this.margin = this.options.margin;
@@ -444,7 +443,8 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS,
       this.showCVD,
-      this.options.cvdHeightRatio ?? 0.2
+      this.options.cvdHeightRatio ?? 0.2,
+      this.getDeltaTableHeight()
     );
 
     this.interactions = new Interactions(
@@ -465,6 +465,16 @@ export class Chart {
         onCvdResize: (ratio: number) => {
           this.options.cvdHeightRatio = ratio;
           this.updateOptions({ cvdHeightRatio: ratio });
+        },
+        onTableResize: (height: number) => {
+          const allRows = ['volume', 'volChange', 'buyVol', 'buyVolPercent', 'sellVol', 'sellVolPercent', 'delta', 'deltaPercent', 'minDelta', 'maxDelta', 'poc', 'hlRange'];
+          const visibility = this.options.tableRowVisibility || {};
+          const visibleRows = allRows.filter(key => visibility[key as keyof typeof visibility] !== false).length;
+          if (visibleRows > 0) {
+            const tableRowHeight = Math.max(10, height / visibleRows);
+            this.options.tableRowHeight = tableRowHeight;
+            this.updateOptions({ tableRowHeight });
+          }
         }
       },
       this.crosshair,
@@ -486,7 +496,10 @@ export class Chart {
       this.crosshair,
       this.lastPrice,
       this.interactions,
-      this.cvdValues
+      this.cvdValues,
+      this.showDeltaTable,
+      this.options.tableRowVisibility,
+      this.options.tableRowHeight ?? 16
     );
   }
 
@@ -574,23 +587,12 @@ export class Chart {
       });
     }
 
-    if (this.volumeHeatmapBtn && this.volumeHeatmapDropdown) {
-      this.volumeHeatmapBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Toggle dropdown visibility
-        const isVisible = this.volumeHeatmapDropdown!.style.display !== 'none';
-        this.hideAllDropdowns();
-        if (!isVisible) {
-          this.volumeHeatmapDropdown!.style.display = 'block';
-        }
-      });
-
-      // Close dropdown when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!this.volumeHeatmapBtn?.contains(e.target as Node) &&
-          !this.volumeHeatmapDropdown?.contains(e.target as Node)) {
-          this.volumeHeatmapDropdown!.style.display = 'none';
-        }
+    // Volume Heatmap simple toggle handler
+    if (this.volumeHeatmapBtn) {
+      this.volumeHeatmapBtn.addEventListener('click', () => {
+        this.showVolumeHeatmap = !this.showVolumeHeatmap;
+        this.updateOptions({ showVolumeHeatmap: this.showVolumeHeatmap });
+        this.updateButtonText();
       });
     }
 
@@ -611,23 +613,15 @@ export class Chart {
       });
     }
 
-    if (this.cvdBtn && this.cvdDropdown) {
-      this.cvdBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Toggle dropdown visibility
-        const isVisible = this.cvdDropdown!.style.display !== 'none';
-        this.hideAllDropdowns();
-        if (!isVisible) {
-          this.cvdDropdown!.style.display = 'block';
+    // CVD simple toggle handler
+    if (this.cvdBtn) {
+      this.cvdBtn.addEventListener('click', () => {
+        this.showCVD = !this.showCVD;
+        if (this.showCVD) {
+          this.calculateCVD();
         }
-      });
-
-      // Close dropdown when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!this.cvdBtn?.contains(e.target as Node) &&
-          !this.cvdDropdown?.contains(e.target as Node)) {
-          this.cvdDropdown!.style.display = 'none';
-        }
+        this.updateOptions({ showCVD: this.showCVD });
+        this.updateButtonText();
       });
     }
 
@@ -637,6 +631,77 @@ export class Chart {
         this.setTimeframe(tf);
       });
     });
+
+    // Delta Table toggle button handler
+    if (this.deltaTableBtn) {
+      this.deltaTableBtn.addEventListener('click', () => {
+        this.showDeltaTable = !this.showDeltaTable;
+        this.options.showDeltaTable = this.showDeltaTable;
+        if (this.showDeltaTable) {
+          this.deltaTableBtn!.classList.add('active');
+        } else {
+          this.deltaTableBtn!.classList.remove('active');
+        }
+        // Rebuild drawing with new option
+        this.updateOptions({ showDeltaTable: this.showDeltaTable });
+      });
+    }
+
+    // Edit Settings button and popup handlers
+    if (this.editBtn && this.editPopup) {
+      // Toggle popup on button click
+      this.editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = this.editPopup!.style.display === 'block';
+        this.hideAllDropdowns();
+        if (!isVisible) {
+          this.editPopup!.style.display = 'block';
+        }
+      });
+
+      // Table row checkbox handlers
+      this.editPopup.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        const checkbox = cb as HTMLInputElement;
+        checkbox.addEventListener('change', () => {
+          const rowKey = checkbox.dataset.row as keyof typeof this.options.tableRowVisibility;
+          if (rowKey && this.options.tableRowVisibility) {
+            this.options.tableRowVisibility[rowKey] = checkbox.checked;
+            this.updateOptions({ tableRowVisibility: this.options.tableRowVisibility });
+          }
+        });
+      });
+
+      // Heatmap type radio handlers
+      this.editPopup.querySelectorAll('input[name="heatmapType"]').forEach(radio => {
+        const r = radio as HTMLInputElement;
+        r.addEventListener('change', () => {
+          const isDynamic = r.value === 'dynamic';
+          this.volumeHeatmapDynamic = isDynamic;
+          this.updateOptions({ volumeHeatmapDynamic: isDynamic });
+          this.updateButtonText();
+        });
+      });
+
+      // CVD type radio handlers
+      this.editPopup.querySelectorAll('input[name="cvdType"]').forEach(radio => {
+        const r = radio as HTMLInputElement;
+        r.addEventListener('change', () => {
+          const cvdType = r.value as 'ticker' | 'footprint';
+          this.options.cvdType = cvdType;
+          this.updateOptions({ cvdType });
+          this.calculateCVD();
+          this.updateButtonText();
+        });
+      });
+
+      // Close popup when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!this.editBtn?.contains(e.target as Node) &&
+          !this.editPopup?.contains(e.target as Node)) {
+          this.editPopup!.style.display = 'none';
+        }
+      });
+    }
   }
 
   private handleWheel(e: WheelEvent) {
@@ -667,7 +732,8 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS,
       this.showCVD,
-      this.options.cvdHeightRatio ?? 0.2
+      this.options.cvdHeightRatio ?? 0.2,
+      this.getDeltaTableHeight()
     );
 
     this.drawing = new Drawing(
@@ -685,7 +751,10 @@ export class Chart {
       this.crosshair,
       this.lastPrice,
       this.interactions,
-      this.cvdValues
+      this.cvdValues,
+      this.showDeltaTable,
+      this.options.tableRowVisibility,
+      this.options.tableRowHeight ?? 16
     );
 
     this.setupCanvas();
@@ -738,7 +807,8 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS,
       this.showCVD,
-      this.options.cvdHeightRatio ?? 0.2
+      this.options.cvdHeightRatio ?? 0.2,
+      this.getDeltaTableHeight()
     );
 
     // Invalidate ladderTop cache when tick size changes
@@ -784,7 +854,10 @@ export class Chart {
       this.crosshair,
       this.lastPrice,
       this.interactions,
-      this.cvdValues
+      this.cvdValues,
+      this.showDeltaTable,
+      this.options.tableRowVisibility,
+      this.options.tableRowHeight ?? 16
     );
 
     this.drawing.drawAll();
@@ -837,7 +910,8 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS,
       this.showCVD,
-      this.options.cvdHeightRatio ?? 0.2
+      this.options.cvdHeightRatio ?? 0.2,
+      this.getDeltaTableHeight()
     );
 
     // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
@@ -863,7 +937,10 @@ export class Chart {
       this.crosshair,
       this.lastPrice,
       this.interactions,
-      this.cvdValues
+      this.cvdValues,
+      this.showDeltaTable,
+      this.options.tableRowVisibility,
+      this.options.tableRowHeight ?? 16
     );
 
     this.layout();
@@ -1028,7 +1105,8 @@ export class Chart {
       this.baseRowPx,
       this.TEXT_VIS,
       this.showCVD,
-      this.options.cvdHeightRatio ?? 0.2
+      this.options.cvdHeightRatio ?? 0.2,
+      this.getDeltaTableHeight()
     );
 
     this.drawing = new Drawing(
@@ -1046,7 +1124,10 @@ export class Chart {
       this.crosshair,
       this.lastPrice,
       this.interactions,
-      this.cvdValues
+      this.cvdValues,
+      this.showDeltaTable,
+      this.options.tableRowVisibility,
+      this.options.tableRowHeight ?? 16
     );
 
     this.drawing.drawAll();
@@ -1071,12 +1152,25 @@ export class Chart {
     }
   }
 
+  /** Calculate the height of the delta table based on visible rows */
+  private getDeltaTableHeight(): number {
+    if (!this.showDeltaTable) return 0;
+    const rowHeight = this.options.tableRowHeight || 16;
+    const allRows = ['volume', 'volChange', 'buyVol', 'buyVolPercent', 'sellVol', 'sellVolPercent', 'delta', 'deltaPercent', 'minDelta', 'maxDelta', 'poc', 'hlRange'];
+    const visibility = this.options.tableRowVisibility || {};
+    const visibleRows = allRows.filter(key => visibility[key as keyof typeof visibility] !== false);
+    return rowHeight * visibleRows.length;
+  }
+
   private hideAllDropdowns() {
     if (this.volumeHeatmapDropdown) {
       this.volumeHeatmapDropdown.style.display = 'none';
     }
     if (this.cvdDropdown) {
       this.cvdDropdown.style.display = 'none';
+    }
+    if (this.editPopup) {
+      this.editPopup.style.display = 'none';
     }
   }
 

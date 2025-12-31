@@ -223,7 +223,8 @@ export function drawFootprint(
   scales: Scales,
   theme: any,
   view: any,
-  showVolumeFootprint: boolean
+  showVolumeFootprint: boolean,
+  showDeltaTable: boolean = false
 ): void {
   const cx = scales.indexToX(i, startIndex);
   const half = scales.scaledCandle() / 2;
@@ -253,8 +254,8 @@ export function drawFootprint(
       drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, view.zoomX);
     }
 
-    // Draw delta and total volume labels
-    if (scales.shouldShowCellText()) {
+    // Draw delta and total volume labels (skip if showing in table instead)
+    if (scales.shouldShowCellText() && !showDeltaTable) {
       drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, view.zoomX);
     }
   }

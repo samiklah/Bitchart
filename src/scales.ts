@@ -22,6 +22,7 @@ export class Scales {
   private TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number };
   private showCVD: boolean;
   private cvdHeightRatio: number;
+  private deltaTableHeight: number;
 
   // Cached ladderTop to prevent recalculation on every access
   private cachedLadderTop: number = 10000;
@@ -52,7 +53,8 @@ export class Scales {
     baseRowPx: number,
     TEXT_VIS: { minZoomX: number; minRowPx: number; minBoxPx: number },
     showCVD: boolean = false,
-    cvdHeightRatio: number = 0.2
+    cvdHeightRatio: number = 0.2,
+    deltaTableHeight: number = 0
   ) {
     this.data = data;
     this.margin = margin;
@@ -65,11 +67,12 @@ export class Scales {
     this.TEXT_VIS = TEXT_VIS;
     this.showCVD = showCVD;
     this.cvdHeightRatio = cvdHeightRatio;
+    this.deltaTableHeight = deltaTableHeight;
   }
 
   /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
   chartHeight(): number {
-    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
     if (!this.showCVD) {
       return totalHeight;
     }
@@ -80,8 +83,13 @@ export class Scales {
   /** Returns the height of the CVD pane. */
   cvdHeight(): number {
     if (!this.showCVD) return 0;
-    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
     return totalHeight * this.cvdHeightRatio;
+  }
+
+  /** Returns the height of the delta table. */
+  getDeltaTableHeight(): number {
+    return this.deltaTableHeight;
   }
 
   /** Returns the Y coordinate where the CVD pane starts. */

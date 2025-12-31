@@ -126,6 +126,25 @@ export interface VFCOptions {
     cvdHeightRatio?: number;
     /** Method for calculating CVD: 'ticker' (user formula) or 'footprint' (standard). Default: 'ticker' */
     cvdType?: 'ticker' | 'footprint';
+    /** Whether to show delta values in a table below the chart instead of under candles. Default: false */
+    showDeltaTable?: boolean;
+    /** Which table rows to show. Default: all true */
+    tableRowVisibility?: {
+        volume?: boolean;
+        volChange?: boolean;
+        buyVol?: boolean;
+        buyVolPercent?: boolean;
+        sellVol?: boolean;
+        sellVolPercent?: boolean;
+        delta?: boolean;
+        deltaPercent?: boolean;
+        minDelta?: boolean;
+        maxDelta?: boolean;
+        poc?: boolean;
+        hlRange?: boolean;
+    };
+    /** Height of each row in the delta table in pixels. Default: 16 */
+    tableRowHeight?: number;
 }
 /**
  * Event callbacks for chart interactions.
@@ -138,6 +157,8 @@ export interface VFCEvents {
     onPan?: (offsetX: number, offsetRows: number) => void;
     /** Called when mouse moves over chart. Parameters: x, y (screen coordinates), visible (cursor visibility) */
     onMouseMove?: (x: number, y: number, visible: boolean) => void;
+    /** Called when the delta table is resized. Parameters: height (new table height in pixels) */
+    onTableResize?: (height: number) => void;
 }
 /**
  * Represents a measurement rectangle drawn on the chart for analysis.

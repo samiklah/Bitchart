@@ -24,6 +24,9 @@ export class Interactions {
   private isDraggingCvdDivider = false;
   private cvdDividerHitZone = 6; // pixels around the divider that are draggable
 
+  // Table resize state
+  private isDraggingTableDivider = false;
+
   // Measure state
   private isMeasureMode = false;
   private measureRectangle: MeasureRectangle | null = null;
@@ -111,6 +114,15 @@ export class Interactions {
     const cvdOriginY = this.scales.cvdOriginY();
     if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
       this.handleCvdDividerDrag(e, rect);
+      return;
+    }
+
+    // Check if clicking on Table divider (top edge of delta table)
+    const tableHeight = this.scales.getDeltaTableHeight();
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const tableY = canvasHeight - this.margin.bottom - tableHeight;
+    if (tableHeight > 0 && Math.abs(y - tableY) <= this.cvdDividerHitZone) {
+      this.handleTableDividerDrag(e, rect);
       return;
     }
 
@@ -268,6 +280,41 @@ export class Interactions {
     this.canvas.addEventListener('pointercancel', onUp);
   }
 
+  private handleTableDividerDrag(e: PointerEvent, rect: DOMRect): void {
+    this.isDraggingTableDivider = true;
+    this.canvas.setPointerCapture(e.pointerId);
+    this.canvas.style.cursor = 'ns-resize';
+
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+
+    const onMove = (ev: PointerEvent) => {
+      const y = ev.clientY - rect.top;
+      // Calculate new table height
+      // Table bottom is fixed at canvasHeight - margin.bottom
+      // Table top is dragging point y
+      const tableBottom = canvasHeight - this.margin.bottom;
+      let newHeight = tableBottom - y;
+
+      // Enforce minimum height (e.g. 10px) and max height
+      newHeight = Math.max(10, Math.min(canvasHeight * 0.8, newHeight));
+
+      this.events.onTableResize?.(newHeight);
+    };
+
+    const onUp = () => {
+      this.isDraggingTableDivider = false;
+      this.canvas.releasePointerCapture(e.pointerId);
+      this.canvas.style.cursor = '';
+      this.canvas.removeEventListener('pointermove', onMove);
+      this.canvas.removeEventListener('pointerup', onUp);
+      this.canvas.removeEventListener('pointercancel', onUp);
+    };
+
+    this.canvas.addEventListener('pointermove', onMove);
+    this.canvas.addEventListener('pointerup', onUp);
+    this.canvas.addEventListener('pointercancel', onUp);
+  }
+
   private cancelMomentum(): void {
     if (this.momentum.raf) {
       cancelAnimationFrame(this.momentum.raf);
@@ -313,15 +360,22 @@ export class Interactions {
     // Check if mouse is over CVD divider
     const cvdHeight = this.scales.cvdHeight();
     const cvdOriginY = this.scales.cvdOriginY();
+
+    // Check if mouse is over Table divider
+    const tableHeight = this.scales.getDeltaTableHeight();
+    const canvasHeight = this.canvas.height / window.devicePixelRatio;
+    const tableY = canvasHeight - this.margin.bottom - tableHeight;
+
     if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
       this.canvas.style.cursor = 'ns-resize';
-    } else if (!this.isDraggingCvdDivider) {
+    } else if (tableHeight > 0 && Math.abs(y - tableY) <= this.cvdDividerHitZone) {
+      this.canvas.style.cursor = 'ns-resize';
+    } else if (!this.isDraggingCvdDivider && !this.isDraggingTableDivider) {
       this.canvas.style.cursor = '';
     }
 
     // Check if mouse is over the chart area
     const chartRight = this.canvas.clientWidth - this.margin.right;
-    const canvasHeight = this.canvas.height / window.devicePixelRatio;
     const yBottom = canvasHeight - this.margin.bottom;
 
     const overChartBody = x >= this.margin.left && x <= chartRight &&

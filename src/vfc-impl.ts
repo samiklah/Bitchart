@@ -57,7 +57,23 @@ export class VFC {
       theme: options.theme || {},
       showCVD: options.showCVD ?? false,
       cvdHeightRatio: options.cvdHeightRatio || 0.2,
-      cvdType: options.cvdType || 'ticker'
+      cvdType: options.cvdType || 'ticker',
+      showDeltaTable: options.showDeltaTable ?? false,
+      tableRowVisibility: options.tableRowVisibility || {
+        volume: true,
+        volChange: true,
+        buyVol: true,
+        buyVolPercent: true,
+        sellVol: true,
+        sellVolPercent: true,
+        delta: true,
+        deltaPercent: true,
+        minDelta: true,
+        maxDelta: true,
+        poc: true,
+        hlRange: true
+      },
+      tableRowHeight: options.tableRowHeight || 16
     };
 
     this.events = events;

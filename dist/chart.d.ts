@@ -37,6 +37,10 @@ export declare class Chart {
     private cvdValues;
     private cvdBaseline;
     private cvdNormalize;
+    private showDeltaTable;
+    private deltaTableBtn;
+    private editBtn;
+    private editPopup;
     private TICK;
     private detectTickSize;
     private readonly BASE_CANDLE;
@@ -82,6 +86,8 @@ export declare class Chart {
     private calculateCVD;
     addCandle(candle: CandleData): void;
     private updateButtonText;
+    /** Calculate the height of the delta table based on visible rows */
+    private getDeltaTableHeight;
     private hideAllDropdowns;
     /**
      * Set the timeframe for aggregation and update display

@@ -36,4 +36,4 @@ export declare function drawCandleWickAndBody(ctx: CanvasRenderingContext2D, cx:
 /**
  * Main footprint drawing function that orchestrates all footprint-related rendering.
  */
-export declare function drawFootprint(ctx: CanvasRenderingContext2D, candle: CandleData, i: number, startIndex: number, scales: Scales, theme: any, view: any, showVolumeFootprint: boolean): void;
+export declare function drawFootprint(ctx: CanvasRenderingContext2D, candle: CandleData, i: number, startIndex: number, scales: Scales, theme: any, view: any, showVolumeFootprint: boolean, showDeltaTable?: boolean): void;

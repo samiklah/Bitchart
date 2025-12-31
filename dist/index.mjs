@@ -111,7 +111,7 @@ class Scales {
      * @param showCVD Whether CVD indicator is shown
      * @param cvdHeightRatio Ratio of total height used for CVD
      */
-    constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS, showCVD = false, cvdHeightRatio = 0.2) {
+    constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS, showCVD = false, cvdHeightRatio = 0.2, deltaTableHeight = 0) {
         this.data = [];
         // Cached ladderTop to prevent recalculation on every access
         this.cachedLadderTop = 10000;
@@ -127,10 +127,11 @@ class Scales {
         this.TEXT_VIS = TEXT_VIS;
         this.showCVD = showCVD;
         this.cvdHeightRatio = cvdHeightRatio;
+        this.deltaTableHeight = deltaTableHeight;
     }
     /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
     chartHeight() {
-        const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+        const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
         if (!this.showCVD) {
             return totalHeight;
         }
@@ -141,8 +142,12 @@ class Scales {
     cvdHeight() {
         if (!this.showCVD)
             return 0;
-        const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom;
+        const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
         return totalHeight * this.cvdHeightRatio;
+    }
+    /** Returns the height of the delta table. */
+    getDeltaTableHeight() {
+        return this.deltaTableHeight;
     }
     /** Returns the Y coordinate where the CVD pane starts. */
     cvdOriginY() {
@@ -321,6 +326,8 @@ class Interactions {
         // CVD resize state
         this.isDraggingCvdDivider = false;
         this.cvdDividerHitZone = 6; // pixels around the divider that are draggable
+        // Table resize state
+        this.isDraggingTableDivider = false;
         // Measure state
         this.isMeasureMode = false;
         this.measureRectangle = null;
@@ -388,6 +395,14 @@ class Interactions {
         const cvdOriginY = this.scales.cvdOriginY();
         if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
             this.handleCvdDividerDrag(e, rect);
+            return;
+        }
+        // Check if clicking on Table divider (top edge of delta table)
+        const tableHeight = this.scales.getDeltaTableHeight();
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const tableY = canvasHeight - this.margin.bottom - tableHeight;
+        if (tableHeight > 0 && Math.abs(y - tableY) <= this.cvdDividerHitZone) {
+            this.handleTableDividerDrag(e, rect);
             return;
         }
         // Check if we're in measure mode
@@ -516,6 +531,35 @@ class Interactions {
         this.canvas.addEventListener('pointerup', onUp);
         this.canvas.addEventListener('pointercancel', onUp);
     }
+    handleTableDividerDrag(e, rect) {
+        this.isDraggingTableDivider = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        this.canvas.style.cursor = 'ns-resize';
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const onMove = (ev) => {
+            var _a, _b;
+            const y = ev.clientY - rect.top;
+            // Calculate new table height
+            // Table bottom is fixed at canvasHeight - margin.bottom
+            // Table top is dragging point y
+            const tableBottom = canvasHeight - this.margin.bottom;
+            let newHeight = tableBottom - y;
+            // Enforce minimum height (e.g. 10px) and max height
+            newHeight = Math.max(10, Math.min(canvasHeight * 0.8, newHeight));
+            (_b = (_a = this.events).onTableResize) === null || _b === void 0 ? void 0 : _b.call(_a, newHeight);
+        };
+        const onUp = () => {
+            this.isDraggingTableDivider = false;
+            this.canvas.releasePointerCapture(e.pointerId);
+            this.canvas.style.cursor = '';
+            this.canvas.removeEventListener('pointermove', onMove);
+            this.canvas.removeEventListener('pointerup', onUp);
+            this.canvas.removeEventListener('pointercancel', onUp);
+        };
+        this.canvas.addEventListener('pointermove', onMove);
+        this.canvas.addEventListener('pointerup', onUp);
+        this.canvas.addEventListener('pointercancel', onUp);
+    }
     cancelMomentum() {
         if (this.momentum.raf) {
             cancelAnimationFrame(this.momentum.raf);
@@ -558,15 +602,21 @@ class Interactions {
         // Check if mouse is over CVD divider
         const cvdHeight = this.scales.cvdHeight();
         const cvdOriginY = this.scales.cvdOriginY();
+        // Check if mouse is over Table divider
+        const tableHeight = this.scales.getDeltaTableHeight();
+        const canvasHeight = this.canvas.height / window.devicePixelRatio;
+        const tableY = canvasHeight - this.margin.bottom - tableHeight;
         if (cvdHeight > 0 && Math.abs(y - cvdOriginY) <= this.cvdDividerHitZone) {
             this.canvas.style.cursor = 'ns-resize';
         }
-        else if (!this.isDraggingCvdDivider) {
+        else if (tableHeight > 0 && Math.abs(y - tableY) <= this.cvdDividerHitZone) {
+            this.canvas.style.cursor = 'ns-resize';
+        }
+        else if (!this.isDraggingCvdDivider && !this.isDraggingTableDivider) {
             this.canvas.style.cursor = '';
         }
         // Check if mouse is over the chart area
         const chartRight = this.canvas.clientWidth - this.margin.right;
-        const canvasHeight = this.canvas.height / window.devicePixelRatio;
         const yBottom = canvasHeight - this.margin.bottom;
         const overChartBody = x >= this.margin.left && x <= chartRight &&
             y >= this.margin.top && y <= yBottom;
@@ -738,7 +788,7 @@ function drawCandleWickAndBody(ctx, cx, half, candle, scales, theme) {
 /**
  * Main footprint drawing function that orchestrates all footprint-related rendering.
  */
-function drawFootprint(ctx, candle, i, startIndex, scales, theme, view, showVolumeFootprint) {
+function drawFootprint(ctx, candle, i, startIndex, scales, theme, view, showVolumeFootprint, showDeltaTable = false) {
     const cx = scales.indexToX(i, startIndex);
     const half = scales.scaledCandle() / 2;
     if (showVolumeFootprint) {
@@ -759,8 +809,8 @@ function drawFootprint(ctx, candle, i, startIndex, scales, theme, view, showVolu
         if (enableProfile && scales.shouldShowCellText()) {
             drawValueAreaBoundaries(ctx, cx, half, VAH, VAL, leftX, rightX, scales, theme, view.zoomX);
         }
-        // Draw delta and total volume labels
-        if (scales.shouldShowCellText()) {
+        // Draw delta and total volume labels (skip if showing in table instead)
+        if (scales.shouldShowCellText() && !showDeltaTable) {
             drawDeltaTotalLabels(ctx, cx, maxRow, totBuy, totSell, totalVol, scales, theme, view.zoomX);
         }
     }
@@ -1018,8 +1068,11 @@ class Drawing {
     updateCVD(values) {
         this.cvdValues = values;
     }
-    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions, cvdValues = []) {
+    constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions, cvdValues = [], showDeltaTable = false, tableRowVisibility = {}, tableRowHeight = 16) {
         this.cvdValues = [];
+        this.showDeltaTable = false;
+        this.tableRowVisibility = {};
+        this.tableRowHeight = 16;
         this.ctx = ctx;
         this.data = data;
         this.margin = margin;
@@ -1035,6 +1088,15 @@ class Drawing {
         this.lastPrice = lastPrice;
         this.interactions = interactions;
         this.cvdValues = cvdValues;
+        this.showDeltaTable = showDeltaTable;
+        this.tableRowVisibility = tableRowVisibility;
+        this.tableRowHeight = tableRowHeight;
+    }
+    setShowDeltaTable(show) {
+        this.showDeltaTable = show;
+    }
+    getShowDeltaTable() {
+        return this.showDeltaTable;
     }
     drawAll() {
         const width = this.ctx.canvas.width / window.devicePixelRatio;
@@ -1047,6 +1109,8 @@ class Drawing {
         this.drawChart();
         if (this.scales.cvdHeight() > 0)
             this.drawCVD();
+        if (this.showDeltaTable)
+            this.drawDeltaTable();
         drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
         this.drawScales(width, height);
         drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
@@ -1054,6 +1118,178 @@ class Drawing {
             drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
         if (this.showBounds)
             drawBounds(this.ctx, width, height, this.margin, this.scales);
+    }
+    drawDeltaTable() {
+        const vr = this.scales.getVisibleRange();
+        if (vr.endIndex <= vr.startIndex)
+            return;
+        const ctx = this.ctx;
+        const width = ctx.canvas.width / window.devicePixelRatio;
+        const height = ctx.canvas.height / window.devicePixelRatio;
+        // Define row configurations with visibility keys
+        const rowHeight = this.tableRowHeight;
+        const allRows = [
+            { key: 'volume', label: 'Volume' },
+            { key: 'volChange', label: 'Vol Change %' },
+            { key: 'buyVol', label: 'Buy Volume' },
+            { key: 'buyVolPercent', label: 'Buy Vol %' },
+            { key: 'sellVol', label: 'Sell Volume' },
+            { key: 'sellVolPercent', label: 'Sell Vol %' },
+            { key: 'delta', label: 'Delta' },
+            { key: 'deltaPercent', label: 'Delta %' },
+            { key: 'minDelta', label: 'Min Delta' },
+            { key: 'maxDelta', label: 'Max Delta' },
+            { key: 'poc', label: 'POC' },
+            { key: 'hlRange', label: 'HL Range' }
+        ];
+        // Filter to only visible rows
+        const visibleRows = allRows.filter(row => this.tableRowVisibility[row.key] !== false);
+        const numRows = visibleRows.length;
+        if (numRows === 0)
+            return;
+        const tableHeight = rowHeight * numRows;
+        // Position table at the very bottom, just above the timeline
+        const tableY = height - this.margin.bottom - tableHeight;
+        // Draw table background with dark color to match chart theme
+        ctx.save();
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, tableY, width, tableHeight);
+        // Draw horizontal grid lines
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 0.5;
+        for (let r = 0; r <= numRows; r++) {
+            ctx.beginPath();
+            ctx.moveTo(0, tableY + r * rowHeight);
+            ctx.lineTo(width, tableY + r * rowHeight);
+            ctx.stroke();
+        }
+        // Calculate previous candle volume for volume change %
+        let prevVol = 0;
+        // Draw values for each visible candle
+        for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
+            const candle = this.data[i];
+            const cx = this.scales.indexToX(i, vr.startIndex);
+            // Calculate totals
+            // Calculate totals and min/max delta
+            let totBuy = 0, totSell = 0;
+            let minDelta = Number.MAX_SAFE_INTEGER;
+            let maxDelta = Number.MIN_SAFE_INTEGER;
+            let poc = 0, pocVol = 0;
+            const hasFootprint = candle.footprint.length > 0;
+            if (!hasFootprint) {
+                minDelta = 0;
+                maxDelta = 0;
+            }
+            for (const level of candle.footprint) {
+                totBuy += level.buy;
+                totSell += level.sell;
+                const levelDelta = level.buy - level.sell;
+                minDelta = Math.min(minDelta, levelDelta);
+                maxDelta = Math.max(maxDelta, levelDelta);
+                const levelVol = level.buy + level.sell;
+                if (levelVol > pocVol) {
+                    pocVol = levelVol;
+                    poc = level.price;
+                }
+            }
+            const totalVol = totBuy + totSell;
+            const delta = totBuy - totSell;
+            const deltaPercent = totalVol > 0 ? (delta / totalVol) * 100 : 0;
+            const buyPercent = totalVol > 0 ? (totBuy / totalVol) * 100 : 0;
+            const sellPercent = totalVol > 0 ? (totSell / totalVol) * 100 : 0;
+            const volChange = prevVol > 0 ? ((totalVol - prevVol) / prevVol) * 100 : 0;
+            const hlRange = candle.high - candle.low;
+            // Calculate cell width - full spacing with no gaps
+            const cellWidth = this.scales.scaledSpacing();
+            const cellX = cx - cellWidth / 2;
+            // Only show text if cell is wide enough (at least 30px)
+            const showText = cellWidth >= 30;
+            ctx.textAlign = 'center';
+            // Dynamic font size based on row height, min 9px, max 14px
+            const fontSize = Math.min(14, Math.max(9, Math.floor(rowHeight * 0.7)));
+            ctx.font = `${fontSize}px system-ui`;
+            // Draw each visible row dynamically
+            for (let r = 0; r < visibleRows.length; r++) {
+                const row = visibleRows[r];
+                const rowY = tableY + r * rowHeight;
+                let bgColor = '#2a2a2a'; // default neutral
+                let textValue = '';
+                switch (row.key) {
+                    case 'volume':
+                        bgColor = '#2a2a2a';
+                        textValue = this.scales.formatK(totalVol);
+                        break;
+                    case 'volChange':
+                        bgColor = i === vr.startIndex ? '#2a2a2a' : (volChange >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)');
+                        textValue = i === vr.startIndex ? '-' : `${volChange.toFixed(1)}%`;
+                        break;
+                    case 'buyVol':
+                        bgColor = 'rgba(22, 163, 74, 0.5)';
+                        textValue = this.scales.formatK(totBuy);
+                        break;
+                    case 'buyVolPercent':
+                        bgColor = 'rgba(22, 163, 74, 0.5)';
+                        textValue = `${buyPercent.toFixed(1)}%`;
+                        break;
+                    case 'sellVol':
+                        bgColor = 'rgba(220, 38, 38, 0.5)';
+                        textValue = this.scales.formatK(totSell);
+                        break;
+                    case 'sellVolPercent':
+                        bgColor = 'rgba(220, 38, 38, 0.5)';
+                        textValue = `${sellPercent.toFixed(1)}%`;
+                        break;
+                    case 'delta':
+                        bgColor = delta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        textValue = this.scales.formatK(delta);
+                        break;
+                    case 'deltaPercent':
+                        bgColor = deltaPercent >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        textValue = `${deltaPercent.toFixed(1)}%`;
+                        break;
+                    case 'minDelta':
+                        bgColor = minDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        textValue = this.scales.formatK(minDelta);
+                        break;
+                    case 'maxDelta':
+                        bgColor = maxDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        textValue = this.scales.formatK(maxDelta);
+                        break;
+                    case 'poc':
+                        bgColor = '#2a2a2a';
+                        textValue = poc.toFixed(2);
+                        break;
+                    case 'hlRange':
+                        bgColor = '#2a2a2a';
+                        textValue = hlRange.toFixed(4);
+                        break;
+                }
+                // Draw background
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(cellX, rowY, cellWidth, rowHeight - 1);
+                // Draw text if wide enough
+                if (showText) {
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(textValue, cx, rowY + rowHeight / 2);
+                }
+            }
+            prevVol = totalVol;
+        }
+        // Draw label column background (over cells on the left)
+        const labelWidth = 75;
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, tableY, labelWidth, tableHeight);
+        // Draw row labels on the left (after cells so they're on top)
+        ctx.fillStyle = '#888';
+        // Dynamic font size for labels, max 14px
+        const labelFontSize = Math.min(14, Math.max(9, Math.floor(rowHeight * 0.6)));
+        ctx.font = `${labelFontSize}px system-ui`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        for (let r = 0; r < numRows; r++) {
+            ctx.fillText(visibleRows[r].label, 5, tableY + r * rowHeight + rowHeight / 2);
+        }
+        ctx.restore();
     }
     drawChart() {
         this.ctx.save();
@@ -1063,7 +1299,7 @@ class Drawing {
         this.ctx.clip();
         const vr = this.scales.getVisibleRange();
         for (let i = vr.startIndex; i < vr.endIndex; i++) {
-            drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint);
+            drawFootprint(this.ctx, this.data[i], i, vr.startIndex, this.scales, this.theme, this.view, this.showVolumeFootprint, this.showDeltaTable);
         }
         this.ctx.restore();
     }
@@ -1508,160 +1744,26 @@ class Chart {
         toggleVolumeFootprintBtn.className = 'tool-btn';
         toggleVolumeFootprintBtn.textContent = 'Volume On/Off';
         topToolbar.appendChild(toggleVolumeFootprintBtn);
-        // Create volume heatmap dropdown container
-        const volumeHeatmapContainer = document.createElement('div');
-        volumeHeatmapContainer.className = 'dropdown-container';
-        volumeHeatmapContainer.style.position = 'relative';
-        volumeHeatmapContainer.style.display = 'inline-block';
+        // Create volume heatmap toggle button (simple on/off - type set in edit popup)
         const volumeHeatmapBtn = document.createElement('button');
         volumeHeatmapBtn.id = 'volumeHeatmap';
-        volumeHeatmapBtn.className = 'tool-btn dropdown-btn';
+        volumeHeatmapBtn.className = 'tool-btn';
         volumeHeatmapBtn.textContent = 'Volume Heatmap';
-        volumeHeatmapBtn.title = 'Volume heatmap options';
-        volumeHeatmapContainer.appendChild(volumeHeatmapBtn);
-        // Create dropdown menu
-        const dropdown = document.createElement('div');
-        dropdown.className = 'dropdown-menu';
-        dropdown.style.position = 'absolute';
-        dropdown.style.top = '100%';
-        dropdown.style.left = '0';
-        dropdown.style.backgroundColor = '#1a1a1a';
-        dropdown.style.border = '1px solid #444';
-        dropdown.style.borderRadius = '4px';
-        dropdown.style.minWidth = '120px';
-        dropdown.style.zIndex = '1000';
-        dropdown.style.display = 'none';
-        dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-        // Dynamic option
-        const dynamicOption = document.createElement('div');
-        dynamicOption.className = 'dropdown-item';
-        dynamicOption.textContent = 'Dynamic';
-        dynamicOption.style.padding = '8px 12px';
-        dynamicOption.style.cursor = 'pointer';
-        dynamicOption.style.color = '#fff';
-        dynamicOption.style.fontSize = '12px';
-        dynamicOption.addEventListener('mouseenter', () => dynamicOption.style.backgroundColor = '#333');
-        dynamicOption.addEventListener('mouseleave', () => dynamicOption.style.backgroundColor = 'transparent');
-        dynamicOption.addEventListener('click', () => {
-            this.updateOptions({ volumeHeatmapDynamic: true, showVolumeHeatmap: true });
-            this.updateButtonText();
-            dropdown.style.display = 'none';
-        });
-        dropdown.appendChild(dynamicOption);
-        // Static option
-        const staticOption = document.createElement('div');
-        staticOption.className = 'dropdown-item';
-        staticOption.textContent = 'Static';
-        staticOption.style.padding = '8px 12px';
-        staticOption.style.cursor = 'pointer';
-        staticOption.style.color = '#fff';
-        staticOption.style.fontSize = '12px';
-        staticOption.addEventListener('mouseenter', () => staticOption.style.backgroundColor = '#333');
-        staticOption.addEventListener('mouseleave', () => staticOption.style.backgroundColor = 'transparent');
-        staticOption.addEventListener('click', () => {
-            this.updateOptions({ volumeHeatmapDynamic: false, showVolumeHeatmap: true });
-            this.updateButtonText();
-            dropdown.style.display = 'none';
-        });
-        dropdown.appendChild(staticOption);
-        // Off option
-        const offOption = document.createElement('div');
-        offOption.className = 'dropdown-item';
-        offOption.textContent = 'Off';
-        offOption.style.padding = '8px 12px';
-        offOption.style.cursor = 'pointer';
-        offOption.style.color = '#fff';
-        offOption.style.fontSize = '12px';
-        offOption.addEventListener('mouseenter', () => offOption.style.backgroundColor = '#333');
-        offOption.addEventListener('mouseleave', () => offOption.style.backgroundColor = 'transparent');
-        offOption.addEventListener('click', () => {
-            this.updateOptions({ showVolumeHeatmap: false });
-            this.updateButtonText();
-            dropdown.style.display = 'none';
-        });
-        dropdown.appendChild(offOption);
-        volumeHeatmapContainer.appendChild(dropdown);
-        topToolbar.appendChild(volumeHeatmapContainer);
+        volumeHeatmapBtn.title = 'Toggle volume heatmap (set type in ⚙️ Settings)';
+        topToolbar.appendChild(volumeHeatmapBtn);
         const measureBtn = document.createElement('button');
         measureBtn.id = 'measure';
         measureBtn.className = 'tool-btn';
         measureBtn.title = 'Measure Tool';
         measureBtn.textContent = '📐 Measure';
         topToolbar.appendChild(measureBtn);
-        // Create CVD dropdown container
-        const cvdContainer = document.createElement('div');
-        cvdContainer.className = 'dropdown-container';
-        cvdContainer.style.position = 'relative';
-        cvdContainer.style.display = 'inline-block';
+        // Create CVD toggle button (simple on/off - type set in edit popup)
         const cvdBtn = document.createElement('button');
         cvdBtn.id = 'cvdToggle';
-        cvdBtn.className = 'tool-btn dropdown-btn';
+        cvdBtn.className = 'tool-btn';
         cvdBtn.textContent = 'CVD';
-        cvdBtn.title = 'Cumulative Volume Delta options';
-        cvdContainer.appendChild(cvdBtn);
-        // Create CVD dropdown menu
-        const cvdDropdown = document.createElement('div');
-        cvdDropdown.className = 'dropdown-menu cvd-dropdown';
-        cvdDropdown.style.position = 'absolute';
-        cvdDropdown.style.top = '100%';
-        cvdDropdown.style.left = '0';
-        cvdDropdown.style.backgroundColor = '#1a1a1a';
-        cvdDropdown.style.border = '1px solid #444';
-        cvdDropdown.style.borderRadius = '4px';
-        cvdDropdown.style.minWidth = '140px';
-        cvdDropdown.style.zIndex = '1000';
-        cvdDropdown.style.display = 'none';
-        cvdDropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-        // Ticker option
-        const tickerOption = document.createElement('div');
-        tickerOption.className = 'dropdown-item';
-        tickerOption.textContent = 'Ticker (Vol × Sign)';
-        tickerOption.style.padding = '8px 12px';
-        tickerOption.style.cursor = 'pointer';
-        tickerOption.style.color = '#fff';
-        tickerOption.style.fontSize = '12px';
-        tickerOption.addEventListener('mouseenter', () => tickerOption.style.backgroundColor = '#333');
-        tickerOption.addEventListener('mouseleave', () => tickerOption.style.backgroundColor = 'transparent');
-        tickerOption.addEventListener('click', () => {
-            this.updateOptions({ showCVD: true, cvdType: 'ticker' });
-            this.updateButtonText();
-            cvdDropdown.style.display = 'none';
-        });
-        cvdDropdown.appendChild(tickerOption);
-        // Footprint option
-        const footprintOption = document.createElement('div');
-        footprintOption.className = 'dropdown-item';
-        footprintOption.textContent = 'Footprint (Buy − Sell)';
-        footprintOption.style.padding = '8px 12px';
-        footprintOption.style.cursor = 'pointer';
-        footprintOption.style.color = '#fff';
-        footprintOption.style.fontSize = '12px';
-        footprintOption.addEventListener('mouseenter', () => footprintOption.style.backgroundColor = '#333');
-        footprintOption.addEventListener('mouseleave', () => footprintOption.style.backgroundColor = 'transparent');
-        footprintOption.addEventListener('click', () => {
-            this.updateOptions({ showCVD: true, cvdType: 'footprint' });
-            this.updateButtonText();
-            cvdDropdown.style.display = 'none';
-        });
-        cvdDropdown.appendChild(footprintOption);
-        // Off option
-        const cvdOffOption = document.createElement('div');
-        cvdOffOption.className = 'dropdown-item';
-        cvdOffOption.textContent = 'Off';
-        cvdOffOption.style.padding = '8px 12px';
-        cvdOffOption.style.cursor = 'pointer';
-        cvdOffOption.style.color = '#fff';
-        cvdOffOption.style.fontSize = '12px';
-        cvdOffOption.addEventListener('mouseenter', () => cvdOffOption.style.backgroundColor = '#333');
-        cvdOffOption.addEventListener('mouseleave', () => cvdOffOption.style.backgroundColor = 'transparent');
-        cvdOffOption.addEventListener('click', () => {
-            this.updateOptions({ showCVD: false });
-            this.updateButtonText();
-            cvdDropdown.style.display = 'none';
-        });
-        cvdDropdown.appendChild(cvdOffOption);
-        cvdContainer.appendChild(cvdDropdown);
-        topToolbar.appendChild(cvdContainer);
+        cvdBtn.title = 'Toggle CVD (set type in ⚙️ Settings)';
+        topToolbar.appendChild(cvdBtn);
         // Create timeframe button group
         const tfContainer = document.createElement('div');
         tfContainer.className = 'tf-button-group';
@@ -1674,6 +1776,112 @@ class Chart {
             tfContainer.appendChild(btn);
         }
         topToolbar.appendChild(tfContainer);
+        // Create Delta Table toggle button
+        const deltaTableBtn = document.createElement('button');
+        deltaTableBtn.id = 'deltaTableToggle';
+        deltaTableBtn.className = 'tool-btn';
+        deltaTableBtn.textContent = 'Table';
+        deltaTableBtn.title = 'Show Delta & Delta% in table below chart';
+        topToolbar.appendChild(deltaTableBtn);
+        // Create Edit Settings button and popup
+        const editContainer = document.createElement('div');
+        editContainer.style.position = 'relative';
+        editContainer.style.display = 'inline-block';
+        const editBtn = document.createElement('button');
+        editBtn.id = 'editSettings';
+        editBtn.className = 'tool-btn';
+        editBtn.textContent = '⚙️';
+        editBtn.title = 'Edit Chart Settings';
+        editContainer.appendChild(editBtn);
+        // Create settings popup
+        const editPopup = document.createElement('div');
+        editPopup.id = 'editSettingsPopup';
+        editPopup.style.cssText = `
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 12px;
+      z-index: 1000;
+      min-width: 220px;
+      color: #fff;
+      font-size: 12px;
+    `;
+        // Table Rows Section
+        const tableSection = document.createElement('div');
+        tableSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Table Rows</div>';
+        const tableRows = [
+            { key: 'volume', label: 'Volume' },
+            { key: 'volChange', label: 'Vol Change %' },
+            { key: 'buyVol', label: 'Buy Volume' },
+            { key: 'buyVolPercent', label: 'Buy Vol %' },
+            { key: 'sellVol', label: 'Sell Volume' },
+            { key: 'sellVolPercent', label: 'Sell Vol %' },
+            { key: 'delta', label: 'Delta' },
+            { key: 'deltaPercent', label: 'Delta %' },
+            { key: 'minDelta', label: 'Min Delta' },
+            { key: 'maxDelta', label: 'Max Delta' },
+            { key: 'poc', label: 'POC' },
+            { key: 'hlRange', label: 'HL Range' }
+        ];
+        tableRows.forEach(row => {
+            const label = document.createElement('label');
+            label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.dataset.row = row.key;
+            checkbox.style.marginRight = '8px';
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(row.label));
+            tableSection.appendChild(label);
+        });
+        editPopup.appendChild(tableSection);
+        // Heatmap Type Section
+        const heatmapSection = document.createElement('div');
+        heatmapSection.style.marginTop = '12px';
+        heatmapSection.style.borderTop = '1px solid #444';
+        heatmapSection.style.paddingTop = '12px';
+        heatmapSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Heatmap Type</div>';
+        ['Dynamic', 'Static'].forEach(type => {
+            const label = document.createElement('label');
+            label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'heatmapType';
+            radio.value = type.toLowerCase();
+            radio.checked = type === 'Dynamic';
+            radio.style.marginRight = '8px';
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(type));
+            heatmapSection.appendChild(label);
+        });
+        editPopup.appendChild(heatmapSection);
+        // CVD Type Section
+        const cvdSection = document.createElement('div');
+        cvdSection.style.marginTop = '12px';
+        cvdSection.style.borderTop = '1px solid #444';
+        cvdSection.style.paddingTop = '12px';
+        cvdSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">CVD Type</div>';
+        [{ value: 'ticker', label: 'Ticker (Vol × Sign)' }, { value: 'footprint', label: 'Footprint (Buy − Sell)' }].forEach(opt => {
+            const label = document.createElement('label');
+            label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'cvdType';
+            radio.value = opt.value;
+            radio.checked = opt.value === 'ticker';
+            radio.style.marginRight = '8px';
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(opt.label));
+            cvdSection.appendChild(label);
+        });
+        editPopup.appendChild(cvdSection);
+        editContainer.appendChild(editPopup);
+        topToolbar.appendChild(editContainer);
         const hint = document.createElement('span');
         hint.className = 'hint';
         hint.textContent = 'Volume Footprint Chart';
@@ -1712,6 +1920,11 @@ class Chart {
                 this.timeframeButtons.set(tf, btn);
             }
         });
+        // Store Delta Table button reference
+        this.deltaTableBtn = container.querySelector('#deltaTableToggle');
+        // Store Edit Settings button and popup references
+        this.editBtn = container.querySelector('#editSettings');
+        this.editPopup = container.querySelector('#editSettingsPopup');
     }
     /**
      * Initializes the canvas element and context.
@@ -1743,7 +1956,7 @@ class Chart {
      * @param chartContainer The chart container element
      */
     initializeOptions(options, container, chartContainer) {
-        var _a, _b, _c, _d, _e, _f;
+        var _a, _b, _c, _d, _e, _f, _g;
         this.options = {
             width: options.width || container.clientWidth || 800,
             height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
@@ -1755,11 +1968,27 @@ class Chart {
             showCVD: (_f = options.showCVD) !== null && _f !== void 0 ? _f : false,
             cvdHeightRatio: options.cvdHeightRatio || 0.2,
             cvdType: options.cvdType || 'ticker',
+            showDeltaTable: (_g = options.showDeltaTable) !== null && _g !== void 0 ? _g : false,
             tickSize: options.tickSize || 10,
             initialZoomX: options.initialZoomX || 0.55,
             initialZoomY: options.initialZoomY || 0.55,
             margin: options.margin || this.margin,
-            theme: options.theme || {}
+            theme: options.theme || {},
+            tableRowVisibility: options.tableRowVisibility || {
+                volume: true,
+                volChange: true,
+                buyVol: true,
+                buyVolPercent: true,
+                sellVol: true,
+                sellVolPercent: true,
+                delta: true,
+                deltaPercent: true,
+                minDelta: true,
+                maxDelta: true,
+                poc: true,
+                hlRange: true
+            },
+            tableRowHeight: options.tableRowHeight || 16
         };
         this.margin = this.options.margin;
         this.showGrid = this.options.showGrid;
@@ -1777,8 +2006,8 @@ class Chart {
      * Initializes the chart modules (Scales, Interactions, Drawing).
      */
     initializeModules() {
-        var _a;
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
+        var _a, _b;
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight());
         this.interactions = new Interactions(this.canvas, this.margin, this.view, {
             ...this.events,
             onPan: () => {
@@ -1795,9 +2024,19 @@ class Chart {
             onCvdResize: (ratio) => {
                 this.options.cvdHeightRatio = ratio;
                 this.updateOptions({ cvdHeightRatio: ratio });
+            },
+            onTableResize: (height) => {
+                const allRows = ['volume', 'volChange', 'buyVol', 'buyVolPercent', 'sellVol', 'sellVolPercent', 'delta', 'deltaPercent', 'minDelta', 'maxDelta', 'poc', 'hlRange'];
+                const visibility = this.options.tableRowVisibility || {};
+                const visibleRows = allRows.filter(key => visibility[key] !== false).length;
+                if (visibleRows > 0) {
+                    const tableRowHeight = Math.max(10, height / visibleRows);
+                    this.options.tableRowHeight = tableRowHeight;
+                    this.updateOptions({ tableRowHeight });
+                }
             }
         }, this.crosshair, this.scales);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16);
     }
     constructor(container, options = {}, events = {}) {
         this.data = [];
@@ -1833,6 +2072,12 @@ class Chart {
         this.cvdValues = [];
         this.cvdBaseline = 'global';
         this.cvdNormalize = true;
+        // Delta table state
+        this.showDeltaTable = false;
+        this.deltaTableBtn = null;
+        // Edit settings popup state
+        this.editBtn = null;
+        this.editPopup = null;
         // Constants
         this.TICK = 10;
         this.BASE_CANDLE = 15;
@@ -1913,23 +2158,12 @@ class Chart {
                 });
             });
         }
-        if (this.volumeHeatmapBtn && this.volumeHeatmapDropdown) {
-            this.volumeHeatmapBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                // Toggle dropdown visibility
-                const isVisible = this.volumeHeatmapDropdown.style.display !== 'none';
-                this.hideAllDropdowns();
-                if (!isVisible) {
-                    this.volumeHeatmapDropdown.style.display = 'block';
-                }
-            });
-            // Close dropdown when clicking outside
-            document.addEventListener('click', (e) => {
-                var _a, _b;
-                if (!((_a = this.volumeHeatmapBtn) === null || _a === void 0 ? void 0 : _a.contains(e.target)) &&
-                    !((_b = this.volumeHeatmapDropdown) === null || _b === void 0 ? void 0 : _b.contains(e.target))) {
-                    this.volumeHeatmapDropdown.style.display = 'none';
-                }
+        // Volume Heatmap simple toggle handler
+        if (this.volumeHeatmapBtn) {
+            this.volumeHeatmapBtn.addEventListener('click', () => {
+                this.showVolumeHeatmap = !this.showVolumeHeatmap;
+                this.updateOptions({ showVolumeHeatmap: this.showVolumeHeatmap });
+                this.updateButtonText();
             });
         }
         if (this.measureBtn) {
@@ -1949,23 +2183,15 @@ class Chart {
                 this.drawing.drawAll();
             });
         }
-        if (this.cvdBtn && this.cvdDropdown) {
-            this.cvdBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                // Toggle dropdown visibility
-                const isVisible = this.cvdDropdown.style.display !== 'none';
-                this.hideAllDropdowns();
-                if (!isVisible) {
-                    this.cvdDropdown.style.display = 'block';
+        // CVD simple toggle handler
+        if (this.cvdBtn) {
+            this.cvdBtn.addEventListener('click', () => {
+                this.showCVD = !this.showCVD;
+                if (this.showCVD) {
+                    this.calculateCVD();
                 }
-            });
-            // Close dropdown when clicking outside
-            document.addEventListener('click', (e) => {
-                var _a, _b;
-                if (!((_a = this.cvdBtn) === null || _a === void 0 ? void 0 : _a.contains(e.target)) &&
-                    !((_b = this.cvdDropdown) === null || _b === void 0 ? void 0 : _b.contains(e.target))) {
-                    this.cvdDropdown.style.display = 'none';
-                }
+                this.updateOptions({ showCVD: this.showCVD });
+                this.updateButtonText();
             });
         }
         // Timeframe button handlers
@@ -1974,6 +2200,73 @@ class Chart {
                 this.setTimeframe(tf);
             });
         });
+        // Delta Table toggle button handler
+        if (this.deltaTableBtn) {
+            this.deltaTableBtn.addEventListener('click', () => {
+                this.showDeltaTable = !this.showDeltaTable;
+                this.options.showDeltaTable = this.showDeltaTable;
+                if (this.showDeltaTable) {
+                    this.deltaTableBtn.classList.add('active');
+                }
+                else {
+                    this.deltaTableBtn.classList.remove('active');
+                }
+                // Rebuild drawing with new option
+                this.updateOptions({ showDeltaTable: this.showDeltaTable });
+            });
+        }
+        // Edit Settings button and popup handlers
+        if (this.editBtn && this.editPopup) {
+            // Toggle popup on button click
+            this.editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = this.editPopup.style.display === 'block';
+                this.hideAllDropdowns();
+                if (!isVisible) {
+                    this.editPopup.style.display = 'block';
+                }
+            });
+            // Table row checkbox handlers
+            this.editPopup.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                const checkbox = cb;
+                checkbox.addEventListener('change', () => {
+                    const rowKey = checkbox.dataset.row;
+                    if (rowKey && this.options.tableRowVisibility) {
+                        this.options.tableRowVisibility[rowKey] = checkbox.checked;
+                        this.updateOptions({ tableRowVisibility: this.options.tableRowVisibility });
+                    }
+                });
+            });
+            // Heatmap type radio handlers
+            this.editPopup.querySelectorAll('input[name="heatmapType"]').forEach(radio => {
+                const r = radio;
+                r.addEventListener('change', () => {
+                    const isDynamic = r.value === 'dynamic';
+                    this.volumeHeatmapDynamic = isDynamic;
+                    this.updateOptions({ volumeHeatmapDynamic: isDynamic });
+                    this.updateButtonText();
+                });
+            });
+            // CVD type radio handlers
+            this.editPopup.querySelectorAll('input[name="cvdType"]').forEach(radio => {
+                const r = radio;
+                r.addEventListener('change', () => {
+                    const cvdType = r.value;
+                    this.options.cvdType = cvdType;
+                    this.updateOptions({ cvdType });
+                    this.calculateCVD();
+                    this.updateButtonText();
+                });
+            });
+            // Close popup when clicking outside
+            document.addEventListener('click', (e) => {
+                var _a, _b;
+                if (!((_a = this.editBtn) === null || _a === void 0 ? void 0 : _a.contains(e.target)) &&
+                    !((_b = this.editPopup) === null || _b === void 0 ? void 0 : _b.contains(e.target))) {
+                    this.editPopup.style.display = 'none';
+                }
+            });
+        }
     }
     handleWheel(e) {
         this.interactions.handleWheel(e);
@@ -1983,21 +2276,21 @@ class Chart {
         this.interactions.handlePointerDown(e);
     }
     layout() {
-        var _a;
+        var _a, _b;
         const container = this.canvas.parentElement;
         if (container) {
             this.options.width = container.clientWidth || this.options.width;
             this.options.height = container.clientHeight || this.options.height;
         }
         // Recreate scales and drawing with new dimensions
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight());
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16);
         this.setupCanvas();
         this.drawing.drawAll();
     }
     // Public API
     setData(data) {
-        var _a;
+        var _a, _b;
         this.data = data;
         // Store data in aggregator as base 1m data for aggregation support
         // Only store if this is NOT aggregated data (i.e., it's raw 1m data)
@@ -2029,7 +2322,7 @@ class Chart {
             this.lastPrice = data[data.length - 1].close;
         }
         // Update scales with new data
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2);
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight());
         // Invalidate ladderTop cache when tick size changes
         if (this.TICK !== this.options.tickSize) {
             this.TICK = this.options.tickSize || this.TICK;
@@ -2054,11 +2347,11 @@ class Chart {
         console.log('setData: calling calculateCVD');
         this.calculateCVD();
         console.log('setData: CVD values calculated, length:', this.cvdValues.length);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16);
         this.drawing.drawAll();
     }
     updateOptions(options) {
-        var _a, _b, _c, _d;
+        var _a, _b, _c, _d, _e;
         const oldShowVolumeFootprint = this.showVolumeFootprint;
         const oldCvdType = this.cvdType;
         Object.assign(this.options, options);
@@ -2089,14 +2382,14 @@ class Chart {
             this.view.offsetX = startIndex * newSpacing;
         }
         // Recreate Scales first, then Drawing
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_d = this.options.cvdHeightRatio) !== null && _d !== void 0 ? _d : 0.2);
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_d = this.options.cvdHeightRatio) !== null && _d !== void 0 ? _d : 0.2, this.getDeltaTableHeight());
         // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
         if (this.showCVD) {
             this.calculateCVD();
         }
         // Update Interactions with the new Scales instance
         this.interactions.setScales(this.scales);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_e = this.options.tableRowHeight) !== null && _e !== void 0 ? _e : 16);
         this.layout();
     }
     resize(width, height) {
@@ -2205,7 +2498,7 @@ class Chart {
     }
     // Public method to add new candle data for streaming updates (O(1))
     addCandle(candle) {
-        var _a, _b;
+        var _a, _b, _c;
         this.data.push(candle);
         // Calculate CVD for new candle (O(1) update)
         const lastCVD = this.cvdValues.length > 0 ? this.cvdValues[this.cvdValues.length - 1] : 0;
@@ -2241,8 +2534,8 @@ class Chart {
         }
         this.cvdValues.push(normalizedCVD);
         // Update scales and redraw
-        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_b = this.options.cvdHeightRatio) !== null && _b !== void 0 ? _b : 0.2);
-        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues);
+        this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_b = this.options.cvdHeightRatio) !== null && _b !== void 0 ? _b : 0.2, this.getDeltaTableHeight());
+        this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_c = this.options.tableRowHeight) !== null && _c !== void 0 ? _c : 16);
         this.drawing.drawAll();
     }
     updateButtonText() {
@@ -2265,12 +2558,25 @@ class Chart {
             }
         }
     }
+    /** Calculate the height of the delta table based on visible rows */
+    getDeltaTableHeight() {
+        if (!this.showDeltaTable)
+            return 0;
+        const rowHeight = this.options.tableRowHeight || 16;
+        const allRows = ['volume', 'volChange', 'buyVol', 'buyVolPercent', 'sellVol', 'sellVolPercent', 'delta', 'deltaPercent', 'minDelta', 'maxDelta', 'poc', 'hlRange'];
+        const visibility = this.options.tableRowVisibility || {};
+        const visibleRows = allRows.filter(key => visibility[key] !== false);
+        return rowHeight * visibleRows.length;
+    }
     hideAllDropdowns() {
         if (this.volumeHeatmapDropdown) {
             this.volumeHeatmapDropdown.style.display = 'none';
         }
         if (this.cvdDropdown) {
             this.cvdDropdown.style.display = 'none';
+        }
+        if (this.editPopup) {
+            this.editPopup.style.display = 'none';
         }
     }
     /**
