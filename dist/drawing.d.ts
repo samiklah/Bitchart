@@ -42,6 +42,7 @@ export declare class Drawing {
     }, lastPrice: number | null, interactions: any, cvdValues?: number[], showDeltaTable?: boolean, tableRowVisibility?: typeof Drawing.prototype.tableRowVisibility, tableRowHeight?: number, footprintStyle?: 'bid_ask' | 'delta');
     setShowDeltaTable(show: boolean): void;
     getShowDeltaTable(): boolean;
+    updateLastPrice(price: number | null): void;
     drawAll(): void;
     private drawDeltaTable;
     private drawChart;

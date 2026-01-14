@@ -1335,6 +1335,8 @@ export class Chart {
       this.addCandle(lastAggCandle);
     }
 
+    // Update the drawing's lastPrice before redrawing so price line updates in real-time
+    this.drawing.updateLastPrice(this.lastPrice);
     this.drawing.drawAll();
   }
 

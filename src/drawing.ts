@@ -99,6 +99,10 @@ export class Drawing {
     return this.showDeltaTable;
   }
 
+  public updateLastPrice(price: number | null): void {
+    this.lastPrice = price;
+  }
+
   drawAll(): void {
     const width = this.ctx.canvas.width / window.devicePixelRatio;
     const height = this.ctx.canvas.height / window.devicePixelRatio;
