@@ -74,7 +74,11 @@ export class VFC {
         hlRange: true
       },
       tableRowHeight: options.tableRowHeight || 16,
-      footprintStyle: options.footprintStyle || 'bid_ask'
+      footprintStyle: options.footprintStyle || 'bid_ask',
+      showOI: options.showOI ?? false,
+      oiHeightRatio: options.oiHeightRatio || 0.15,
+      showFundingRate: options.showFundingRate ?? false,
+      fundingRateHeightRatio: options.fundingRateHeightRatio || 0.1
     };
 
     this.events = events;

@@ -59,6 +59,14 @@ export class Chart {
   private editBtn: HTMLButtonElement | null = null;
   private editPopup: HTMLDivElement | null = null;
 
+  // Open Interest indicator state
+  private showOI = false;
+  private oiData: { timestamp: number; value: number }[] = [];
+
+  // Funding Rate indicator state
+  private showFundingRate = false;
+  private fundingRateData: { timestamp: number; value: number }[] = [];
+
   // Constants
   private TICK: number = 10;
 
@@ -330,6 +338,28 @@ export class Chart {
     });
     editPopup.appendChild(fpSection);
 
+    // Indicators Section
+    const indicatorSection = document.createElement('div');
+    indicatorSection.style.marginTop = '12px';
+    indicatorSection.style.borderTop = '1px solid #444';
+    indicatorSection.style.paddingTop = '12px';
+    indicatorSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Indicators</div>';
+    [
+      { id: 'showOI', label: 'Show Open Interest' },
+      { id: 'showFundingRate', label: 'Show Funding Rate' }
+    ].forEach(opt => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.id = opt.id;
+      checkbox.style.marginRight = '8px';
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(opt.label));
+      indicatorSection.appendChild(label);
+    });
+    editPopup.appendChild(indicatorSection);
+
     editContainer.appendChild(editPopup);
     topToolbar.appendChild(editContainer);
 
@@ -448,7 +478,11 @@ export class Chart {
         hlRange: true
       },
       tableRowHeight: options.tableRowHeight || 16,
-      footprintStyle: options.footprintStyle || 'bid_ask'
+      footprintStyle: options.footprintStyle || 'bid_ask',
+      showOI: options.showOI ?? false,
+      oiHeightRatio: options.oiHeightRatio || 0.15,
+      showFundingRate: options.showFundingRate ?? false,
+      fundingRateHeightRatio: options.fundingRateHeightRatio || 0.1
     };
 
     this.margin = this.options.margin;
@@ -460,6 +494,8 @@ export class Chart {
     this.volumeHeatmapDynamic = this.options.volumeHeatmapDynamic;
     this.showCVD = this.options.showCVD;
     this.cvdType = this.options.cvdType;
+    this.showOI = this.options.showOI ?? false;
+    this.showFundingRate = this.options.showFundingRate ?? false;
     this.view.zoomX = this.options.initialZoomX;
     this.view.zoomY = this.options.initialZoomY;
   }
@@ -481,7 +517,11 @@ export class Chart {
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
       this.getDeltaTableHeight(),
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
 
     this.interactions = new Interactions(
@@ -537,7 +577,11 @@ export class Chart {
       this.showDeltaTable,
       this.options.tableRowVisibility,
       this.options.tableRowHeight ?? 16,
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
   }
 
@@ -748,6 +792,28 @@ export class Chart {
         });
       });
 
+      // OI indicator checkbox handler
+      const oiCheckbox = this.editPopup.querySelector('#showOI') as HTMLInputElement | null;
+      if (oiCheckbox) {
+        oiCheckbox.checked = this.showOI;
+        oiCheckbox.addEventListener('change', () => {
+          this.showOI = oiCheckbox.checked;
+          this.drawing.setShowOI(this.showOI);
+          this.updateOptions({ showOI: this.showOI });
+        });
+      }
+
+      // Funding Rate indicator checkbox handler
+      const frCheckbox = this.editPopup.querySelector('#showFundingRate') as HTMLInputElement | null;
+      if (frCheckbox) {
+        frCheckbox.checked = this.showFundingRate;
+        frCheckbox.addEventListener('change', () => {
+          this.showFundingRate = frCheckbox.checked;
+          this.drawing.setShowFundingRate(this.showFundingRate);
+          this.updateOptions({ showFundingRate: this.showFundingRate });
+        });
+      }
+
       // Close popup when clicking outside
       document.addEventListener('click', (e) => {
         if (!this.editBtn?.contains(e.target as Node) &&
@@ -788,7 +854,11 @@ export class Chart {
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
       this.getDeltaTableHeight(),
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
 
     this.drawing = new Drawing(
@@ -810,8 +880,20 @@ export class Chart {
       this.showDeltaTable,
       this.options.tableRowVisibility,
       this.options.tableRowHeight ?? 16,
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
+
+    // Pass stored indicator data to the new Drawing instance
+    if (this.oiData.length > 0) {
+      this.drawing.updateOIData(this.oiData);
+    }
+    if (this.fundingRateData.length > 0) {
+      this.drawing.updateFundingRateData(this.fundingRateData);
+    }
 
     this.setupCanvas();
     this.drawing.drawAll();
@@ -865,7 +947,11 @@ export class Chart {
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
       this.getDeltaTableHeight(),
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
 
     // Invalidate ladderTop cache when tick size changes
@@ -915,8 +1001,20 @@ export class Chart {
       this.showDeltaTable,
       this.options.tableRowVisibility,
       this.options.tableRowHeight ?? 16,
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
+
+    // Pass stored indicator data to the new Drawing instance
+    if (this.oiData.length > 0) {
+      this.drawing.updateOIData(this.oiData);
+    }
+    if (this.fundingRateData.length > 0) {
+      this.drawing.updateFundingRateData(this.fundingRateData);
+    }
 
     this.drawing.drawAll();
   }
@@ -933,6 +1031,8 @@ export class Chart {
     this.volumeHeatmapDynamic = this.options.volumeHeatmapDynamic ?? this.volumeHeatmapDynamic;
     this.showCVD = this.options.showCVD ?? this.showCVD;
     this.cvdType = this.options.cvdType ?? 'ticker';
+    this.showOI = this.options.showOI ?? this.showOI;
+    this.showFundingRate = this.options.showFundingRate ?? this.showFundingRate;
     // const oldCvdDynamic = this.cvdDynamic; // Wait, options doesn't have cvdDynamic directly exposed in interface? 
     // Types interface says: volumeHeatmapDynamic... wait, VFCOptions doesn't have cvdDynamic?
     // Let's check src/types.ts
@@ -970,7 +1070,11 @@ export class Chart {
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
       this.getDeltaTableHeight(),
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
 
     // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
@@ -1000,8 +1104,20 @@ export class Chart {
       this.showDeltaTable,
       this.options.tableRowVisibility,
       this.options.tableRowHeight ?? 16,
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
+
+    // Pass stored indicator data to the new Drawing instance
+    if (this.oiData.length > 0) {
+      this.drawing.updateOIData(this.oiData);
+    }
+    if (this.fundingRateData.length > 0) {
+      this.drawing.updateFundingRateData(this.fundingRateData);
+    }
 
     this.layout();
   }
@@ -1167,7 +1283,11 @@ export class Chart {
       this.showCVD,
       this.options.cvdHeightRatio ?? 0.2,
       this.getDeltaTableHeight(),
-      this.options.footprintStyle
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
 
     this.drawing = new Drawing(
@@ -1188,8 +1308,21 @@ export class Chart {
       this.cvdValues,
       this.showDeltaTable,
       this.options.tableRowVisibility,
-      this.options.tableRowHeight ?? 16
+      this.options.tableRowHeight ?? 16,
+      this.options.footprintStyle,
+      this.showOI,
+      this.options.oiHeightRatio ?? 0.15,
+      this.showFundingRate,
+      this.options.fundingRateHeightRatio ?? 0.1
     );
+
+    // Pass stored indicator data to the new Drawing instance
+    if (this.oiData.length > 0) {
+      this.drawing.updateOIData(this.oiData);
+    }
+    if (this.fundingRateData.length > 0) {
+      this.drawing.updateFundingRateData(this.fundingRateData);
+    }
 
     this.drawing.drawAll();
   }
@@ -1343,4 +1476,78 @@ export class Chart {
   // Getters for API access
   public getOptions() { return this.options; }
   public getShowGrid() { return this.showGrid; }
+
+  /**
+   * Set Open Interest data for the indicator
+   * @param data Array of { timestamp: number, value: number }
+   * @param replace If true, replaces existing data. If false (default), merges with existing data.
+   */
+  public setOIData(data: { timestamp: number; value: number }[], replace: boolean = false): void {
+    if (replace) {
+      this.oiData = data;
+    } else {
+      this.oiData = this.mergeData(this.oiData, data);
+    }
+
+    // Always update Drawing with data (so it's available when user enables indicator)
+    this.drawing.updateOIData(this.oiData);
+
+    // Only redraw if indicator is visible
+    if (this.showOI) {
+      this.drawing.drawAll();
+    }
+  }
+
+  /**
+   * Set Funding Rate data for the indicator
+   * @param data Array of { timestamp: number, value: number }
+   * @param replace If true, replaces existing data. If false (default), merges with existing data.
+   */
+  public setFundingRateData(data: { timestamp: number; value: number }[], replace: boolean = false): void {
+    if (replace) {
+      this.fundingRateData = data;
+    } else {
+      this.fundingRateData = this.mergeData(this.fundingRateData, data);
+    }
+
+    // Always update Drawing with data (so it's available when user enables indicator)
+    this.drawing.updateFundingRateData(this.fundingRateData);
+
+    // Only redraw if indicator is visible
+    if (this.showFundingRate) {
+      this.drawing.drawAll();
+    }
+  }
+
+  /** Get current OI data */
+  public getOIData() { return this.oiData; }
+
+  /** Get current funding rate data */
+  public getFundingRateData() { return this.fundingRateData; }
+
+  // Helper to merge time-series data
+  private mergeData(current: { timestamp: number; value: number }[], incoming: { timestamp: number; value: number }[]) {
+    if (!current || current.length === 0) return incoming;
+    if (!incoming || incoming.length === 0) return current;
+
+    const map = new Map<number, { timestamp: number; value: number }>();
+
+    // Performance optimization: if incoming is strictly after current, just concat
+    const lastCurrent = current[current.length - 1];
+    const firstIncoming = incoming[0];
+
+    if (firstIncoming.timestamp > lastCurrent.timestamp) {
+      return [...current, ...incoming];
+    }
+
+    // Otherwise full merge
+    for (const item of current) {
+      map.set(item.timestamp, item);
+    }
+    for (const item of incoming) {
+      map.set(item.timestamp, item);
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }
 }

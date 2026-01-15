@@ -24,6 +24,10 @@ export class Scales {
   private cvdHeightRatio: number;
   private deltaTableHeight: number;
   private footprintStyle: 'bid_ask' | 'delta';
+  private showOI: boolean;
+  private oiHeightRatio: number;
+  private showFundingRate: boolean;
+  private fundingRateHeightRatio: number;
 
   // Cached ladderTop to prevent recalculation on every access
   private cachedLadderTop: number = 10000;
@@ -42,6 +46,10 @@ export class Scales {
    * @param TEXT_VIS Text visibility thresholds
    * @param showCVD Whether CVD indicator is shown
    * @param cvdHeightRatio Ratio of total height used for CVD
+   * @param showOI Whether OI indicator is shown
+   * @param oiHeightRatio Ratio of total height used for OI
+   * @param showFundingRate Whether funding rate indicator is shown
+   * @param fundingRateHeightRatio Ratio of total height used for funding rate
    */
   constructor(
     data: CandleData[],
@@ -56,7 +64,11 @@ export class Scales {
     showCVD: boolean = false,
     cvdHeightRatio: number = 0.2,
     deltaTableHeight: number = 0,
-    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask'
+    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask',
+    showOI: boolean = false,
+    oiHeightRatio: number = 0.15,
+    showFundingRate: boolean = false,
+    fundingRateHeightRatio: number = 0.1
   ) {
     this.data = data;
     this.margin = margin;
@@ -71,16 +83,22 @@ export class Scales {
     this.cvdHeightRatio = cvdHeightRatio;
     this.deltaTableHeight = deltaTableHeight;
     this.footprintStyle = footprintStyle;
+    this.showOI = showOI;
+    this.oiHeightRatio = oiHeightRatio;
+    this.showFundingRate = showFundingRate;
+    this.fundingRateHeightRatio = fundingRateHeightRatio;
   }
 
-  /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
+  /** Returns the height of the main price chart area in pixels (excluding margins and indicators). */
   chartHeight(): number {
     const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
-    if (!this.showCVD) {
+    const indicatorsRatio = this.indicatorsPaneHeight();
+    if (indicatorsRatio === 0) {
       return totalHeight;
     }
-    // Reserve specific ratio for CVD, plus some gap
-    return totalHeight * (1 - this.cvdHeightRatio) - 2; // 2px gap
+    // Reserve ratio for all indicators, plus gaps
+    const numIndicators = (this.showCVD ? 1 : 0) + (this.showOI ? 1 : 0) + (this.showFundingRate ? 1 : 0);
+    return totalHeight * (1 - indicatorsRatio) - numIndicators * 2; // 2px gap per indicator
   }
 
   /** Returns the height of the CVD pane. */
@@ -98,6 +116,39 @@ export class Scales {
   /** Returns the Y coordinate where the CVD pane starts. */
   cvdOriginY(): number {
     return this.margin.top + this.chartHeight() + 2; // + 2px gap
+  }
+
+  /** Returns the height of the OI pane. */
+  oiHeight(): number {
+    if (!this.showOI) return 0;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
+    return totalHeight * this.oiHeightRatio;
+  }
+
+  /** Returns the Y coordinate where the OI pane starts. */
+  oiOriginY(): number {
+    return this.cvdOriginY() + this.cvdHeight() + (this.showCVD ? 2 : 0);
+  }
+
+  /** Returns the height of the Funding Rate pane. */
+  fundingRateHeight(): number {
+    if (!this.showFundingRate) return 0;
+    const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
+    return totalHeight * this.fundingRateHeightRatio;
+  }
+
+  /** Returns the Y coordinate where the Funding Rate pane starts. */
+  fundingRateOriginY(): number {
+    return this.oiOriginY() + this.oiHeight() + (this.showOI ? 2 : 0);
+  }
+
+  /** Returns the total height reserved for all indicator panes. */
+  private indicatorsPaneHeight(): number {
+    let total = 0;
+    if (this.showCVD) total += this.cvdHeightRatio;
+    if (this.showOI) total += this.oiHeightRatio;
+    if (this.showFundingRate) total += this.fundingRateHeightRatio;
+    return total;
   }
 
   /** Maps a CVD value to a Y coordinate within the CVD pane. */

@@ -168,6 +168,14 @@ export interface VFCOptions {
   };
   /** Height of each row in the delta table in pixels. Default: 16 */
   tableRowHeight?: number;
+  /** Whether to show the Open Interest indicator. Default: false */
+  showOI?: boolean;
+  /** Height ratio for the OI pane (0 to 1). Default: 0.15 */
+  oiHeightRatio?: number;
+  /** Whether to show the Funding Rate indicator. Default: false */
+  showFundingRate?: boolean;
+  /** Height ratio for the funding rate pane (0 to 1). Default: 0.1 */
+  fundingRateHeightRatio?: number;
 }
 
 /**

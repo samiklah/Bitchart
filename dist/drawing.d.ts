@@ -24,6 +24,10 @@ export declare class Drawing {
     private tableRowVisibility;
     private tableRowHeight;
     private footprintStyle;
+    private oiData;
+    private fundingRateData;
+    private showOI;
+    private showFundingRate;
     updateCVD(values: number[]): void;
     constructor(ctx: CanvasRenderingContext2D, data: CandleData[], margin: {
         top: number;
@@ -39,14 +43,26 @@ export declare class Drawing {
         x: number;
         y: number;
         visible: boolean;
-    }, lastPrice: number | null, interactions: any, cvdValues?: number[], showDeltaTable?: boolean, tableRowVisibility?: typeof Drawing.prototype.tableRowVisibility, tableRowHeight?: number, footprintStyle?: 'bid_ask' | 'delta');
+    }, lastPrice: number | null, interactions: any, cvdValues?: number[], showDeltaTable?: boolean, tableRowVisibility?: typeof Drawing.prototype.tableRowVisibility, tableRowHeight?: number, footprintStyle?: 'bid_ask' | 'delta', showOI?: boolean, oiHeightRatio?: number, showFundingRate?: boolean, fundingRateHeightRatio?: number);
     setShowDeltaTable(show: boolean): void;
     getShowDeltaTable(): boolean;
     updateLastPrice(price: number | null): void;
+    updateOIData(data: {
+        timestamp: number;
+        value: number;
+    }[]): void;
+    updateFundingRateData(data: {
+        timestamp: number;
+        value: number;
+    }[]): void;
+    setShowOI(show: boolean): void;
+    setShowFundingRate(show: boolean): void;
     drawAll(): void;
     private drawDeltaTable;
     private drawChart;
     private drawVolumeHeatmap;
     private drawCVD;
+    private drawOI;
+    private drawFundingRate;
     private drawScales;
 }

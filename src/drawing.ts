@@ -45,6 +45,12 @@ export class Drawing {
   private tableRowHeight: number = 16;
   private footprintStyle: 'bid_ask' | 'delta' = 'bid_ask';
 
+  // OI and Funding Rate indicator data
+  private oiData: { timestamp: number; value: number }[] = [];
+  private fundingRateData: { timestamp: number; value: number }[] = [];
+  private showOI: boolean = false;
+  private showFundingRate: boolean = false;
+
   public updateCVD(values: number[]) {
     this.cvdValues = values;
   }
@@ -68,7 +74,11 @@ export class Drawing {
     showDeltaTable: boolean = false,
     tableRowVisibility: typeof Drawing.prototype.tableRowVisibility = {},
     tableRowHeight: number = 16,
-    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask'
+    footprintStyle: 'bid_ask' | 'delta' = 'bid_ask',
+    showOI: boolean = false,
+    oiHeightRatio: number = 0.15,
+    showFundingRate: boolean = false,
+    fundingRateHeightRatio: number = 0.1
   ) {
     this.ctx = ctx;
     this.data = data;
@@ -89,6 +99,8 @@ export class Drawing {
     this.tableRowVisibility = tableRowVisibility;
     this.tableRowHeight = tableRowHeight;
     this.footprintStyle = footprintStyle;
+    this.showOI = showOI;
+    this.showFundingRate = showFundingRate;
   }
 
   public setShowDeltaTable(show: boolean) {
@@ -103,6 +115,22 @@ export class Drawing {
     this.lastPrice = price;
   }
 
+  public updateOIData(data: { timestamp: number; value: number }[]): void {
+    this.oiData = data;
+  }
+
+  public updateFundingRateData(data: { timestamp: number; value: number }[]): void {
+    this.fundingRateData = data;
+  }
+
+  public setShowOI(show: boolean): void {
+    this.showOI = show;
+  }
+
+  public setShowFundingRate(show: boolean): void {
+    this.showFundingRate = show;
+  }
+
   drawAll(): void {
     const width = this.ctx.canvas.width / window.devicePixelRatio;
     const height = this.ctx.canvas.height / window.devicePixelRatio;
@@ -111,11 +139,17 @@ export class Drawing {
     if (this.showVolumeHeatmap) this.drawVolumeHeatmap();
     this.drawChart();
     if (this.scales.cvdHeight() > 0) this.drawCVD();
+    if (this.scales.oiHeight() > 0) this.drawOI();
+    if (this.scales.fundingRateHeight() > 0) this.drawFundingRate();
     if (this.showDeltaTable) this.drawDeltaTable();
     drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
     this.drawScales(width, height);
     drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
-    if (this.crosshair.visible) drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
+    if (this.crosshair.visible) drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme, {
+      oiData: this.oiData,
+      fundingRateData: this.fundingRateData,
+      cvdValues: this.cvdValues
+    });
     if (this.showBounds) drawBounds(this.ctx, width, height, this.margin, this.scales);
   }
 
@@ -485,6 +519,330 @@ export class Drawing {
       if (yPos >= originY + 8 && yPos <= originY + h - 8) {
         ctx.fillText(this.scales.formatK(value), right + 5, yPos);
       }
+    }
+
+    ctx.restore();
+  }
+
+  private drawOI(): void {
+    const h = this.scales.oiHeight();
+    if (h <= 0 || this.oiData.length === 0) return;
+
+    const ctx = this.ctx;
+    const originY = this.scales.oiOriginY();
+    const width = this.ctx.canvas.width / window.devicePixelRatio;
+    const vr = this.scales.getVisibleRange();
+
+    // Calculate candle interval from data (for matching tolerance)
+    let candleIntervalMs = 60000; // Default 1 minute
+    if (this.data.length >= 2) {
+      const t1 = new Date(this.data[0].time).getTime();
+      const t2 = new Date(this.data[1].time).getTime();
+      candleIntervalMs = Math.abs(t2 - t1);
+    }
+    // Use the candle interval as matching tolerance (with some padding)
+    const matchingTolerance = candleIntervalMs + 60000;
+
+    // Match OI data to visible candle timestamps
+    const matchedData: { index: number; value: number }[] = [];
+    for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.data.length); i++) {
+      const candleTime = new Date(this.data[i].time).getTime();
+      // Find closest OI timestamp within matching tolerance
+      let closestValue: number | undefined;
+      let closestDiff = Infinity;
+      for (const point of this.oiData) {
+        const diff = Math.abs(point.timestamp - candleTime);
+        if (diff < closestDiff && diff < matchingTolerance) {
+          closestDiff = diff;
+          closestValue = point.value;
+        }
+      }
+      // Fallback: if no match within tolerance, use closest available point
+      if (closestValue === undefined && this.oiData.length > 0) {
+        let bestDiff = Infinity;
+        for (const point of this.oiData) {
+          const diff = Math.abs(point.timestamp - candleTime);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            closestValue = point.value;
+          }
+        }
+      }
+      if (closestValue !== undefined) {
+        matchedData.push({ index: i, value: closestValue });
+      }
+    }
+
+    if (matchedData.length === 0) return;
+
+    // Determine min/max for visible data
+    let min = Infinity;
+    let max = -Infinity;
+    for (const point of matchedData) {
+      if (point.value < min) min = point.value;
+      if (point.value > max) max = point.value;
+    }
+
+    if (min === Infinity) return;
+
+    const range = max - min;
+    if (range === 0) {
+      min -= 1;
+      max += 1;
+    } else {
+      const pad = range * 0.1;
+      min -= pad;
+      max += pad;
+    }
+
+    // Helper to map value to Y within the OI pane
+    const valueToY = (value: number): number => {
+      const ratio = (value - min) / (max - min);
+      return originY + h - ratio * h;
+    };
+
+    // Draw divider line
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.margin.left, originY);
+    ctx.lineTo(width - this.margin.right, originY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw background
+    ctx.save();
+    ctx.fillStyle = this.theme.background || '#000';
+    ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+
+    // Clip
+    ctx.beginPath();
+    ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+    ctx.clip();
+
+    // Draw OI Line (orange color) - aligned to candle positions
+    ctx.strokeStyle = '#ff9500';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    let first = true;
+    for (const point of matchedData) {
+      const x = this.scales.indexToX(point.index, vr.startIndex);
+      const y = valueToY(point.value);
+      if (first) {
+        ctx.moveTo(x, y);
+        first = false;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw OI Y-Axis Labels Area
+    const right = width - this.margin.right;
+    ctx.save();
+    ctx.fillStyle = this.theme.scaleBackground || '#111';
+    ctx.fillRect(right, originY, this.margin.right, h);
+    ctx.strokeStyle = this.theme.scaleBorder || '#444';
+    ctx.strokeRect(right + 0.5, originY, 0.5, h);
+
+    // Labels
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '10px system-ui';
+
+    // 1. Draw Max Label (Top)
+    ctx.fillStyle = this.theme.textColor || '#aaa';
+    ctx.fillText(this.scales.formatK(max), right + 5, originY + 10);
+
+    // 2. Draw Min Label (Bottom)
+    ctx.fillStyle = this.theme.textColor || '#aaa';
+    ctx.fillText(this.scales.formatK(min), right + 5, originY + h - 10);
+
+    // 3. Draw Current Value Label (if we have data)
+    if (matchedData.length > 0) {
+      const lastPoint = matchedData[matchedData.length - 1];
+      const yPos = valueToY(lastPoint.value);
+
+      // Draw background for current value
+      ctx.fillStyle = '#ff9500';
+      ctx.fillRect(right, yPos - 9, this.margin.right, 18);
+
+      // Draw text
+      ctx.fillStyle = '#fff'; // White text on orange background
+      ctx.font = 'bold 10px system-ui';
+      ctx.fillText(this.scales.formatK(lastPoint.value), right + 5, yPos);
+    }
+
+    ctx.restore();
+  }
+
+  private drawFundingRate(): void {
+    const h = this.scales.fundingRateHeight();
+    if (h <= 0 || this.fundingRateData.length === 0) return;
+
+    const ctx = this.ctx;
+    const originY = this.scales.fundingRateOriginY();
+    const width = this.ctx.canvas.width / window.devicePixelRatio;
+    const vr = this.scales.getVisibleRange();
+
+    // Calculate candle interval from data (for matching tolerance)
+    let candleIntervalMs = 60000; // Default 1 minute
+    if (this.data.length >= 2) {
+      const t1 = new Date(this.data[0].time).getTime();
+      const t2 = new Date(this.data[1].time).getTime();
+      candleIntervalMs = Math.abs(t2 - t1);
+    }
+    // Use the candle interval as matching tolerance (with some padding)
+    const matchingTolerance = candleIntervalMs + 60000;
+
+    // Match Funding Rate data to visible candle timestamps
+    const matchedData: { index: number; value: number }[] = [];
+    for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.data.length); i++) {
+      const candleTime = new Date(this.data[i].time).getTime();
+      // Find closest FR timestamp within matching tolerance
+      let closestValue: number | undefined;
+      let closestDiff = Infinity;
+      for (const point of this.fundingRateData) {
+        const diff = Math.abs(point.timestamp - candleTime);
+        if (diff < closestDiff && diff < matchingTolerance) {
+          closestDiff = diff;
+          closestValue = point.value;
+        }
+      }
+      // Fallback: if no match within tolerance, use closest available point
+      if (closestValue === undefined && this.fundingRateData.length > 0) {
+        let bestDiff = Infinity;
+        for (const point of this.fundingRateData) {
+          const diff = Math.abs(point.timestamp - candleTime);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            closestValue = point.value;
+          }
+        }
+      }
+      if (closestValue !== undefined) {
+        matchedData.push({ index: i, value: closestValue });
+      }
+    }
+
+    if (matchedData.length === 0) return;
+
+    // Determine min/max for visible data
+    let min = Infinity;
+    let max = -Infinity;
+    for (const point of matchedData) {
+      if (point.value < min) min = point.value;
+      if (point.value > max) max = point.value;
+    }
+
+    if (min === Infinity) return;
+
+    const range = max - min;
+    if (range === 0) {
+      min -= 0.0001;
+      max += 0.0001;
+    } else {
+      const pad = range * 0.1;
+      min -= pad;
+      max += pad;
+    }
+
+    // Helper to map value to Y within the Funding Rate pane
+    const valueToY = (value: number): number => {
+      const ratio = (value - min) / (max - min);
+      return originY + h - ratio * h;
+    };
+
+    // Draw divider line
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.margin.left, originY);
+    ctx.lineTo(width - this.margin.right, originY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw background
+    ctx.save();
+    ctx.fillStyle = this.theme.background || '#000';
+    ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+
+    // Clip
+    ctx.beginPath();
+    ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+    ctx.clip();
+
+    // Draw zero line if in range
+    if (min < 0 && max > 0) {
+      const yZero = valueToY(0);
+      ctx.strokeStyle = '#444';
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(this.margin.left, yZero);
+      ctx.lineTo(width - this.margin.right, yZero);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw Funding Rate as bars (green positive, red negative) - aligned to candle positions
+    const spacing = this.scales.scaledSpacing();
+    const barWidth = Math.max(2, spacing * 0.6);
+    const yZero = valueToY(0);
+    for (const point of matchedData) {
+      const x = this.scales.indexToX(point.index, vr.startIndex) - barWidth / 2;
+      const y = valueToY(point.value);
+      const barHeight = Math.abs(yZero - y);
+
+      ctx.fillStyle = point.value >= 0 ? '#22c55e' : '#ef4444';
+      if (point.value >= 0) {
+        ctx.fillRect(x, y, barWidth, barHeight);
+      } else {
+        ctx.fillRect(x, yZero, barWidth, barHeight);
+      }
+    }
+    ctx.restore();
+
+    // Draw Funding Rate Y-Axis Labels Area
+    const right = width - this.margin.right;
+    ctx.save();
+    ctx.fillStyle = this.theme.scaleBackground || '#111';
+    ctx.fillRect(right, originY, this.margin.right, h);
+    ctx.strokeStyle = this.theme.scaleBorder || '#444';
+    ctx.strokeRect(right + 0.5, originY, 0.5, h);
+
+    // Labels header
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '10px system-ui';
+
+    // Helper to format percentage
+    const formatPct = (v: number) => (v * 100).toFixed(4) + '%';
+
+    // 1. Draw Max Label (Top)
+    ctx.fillStyle = this.theme.textColor || '#aaa';
+    ctx.fillText(formatPct(max), right + 3, originY + 10);
+
+    // 2. Draw Min Label (Bottom)
+    ctx.fillStyle = this.theme.textColor || '#aaa';
+    ctx.fillText(formatPct(min), right + 3, originY + h - 10);
+
+    // 3. Draw Current Value Label (if we have data)
+    if (matchedData.length > 0) {
+      const lastPoint = matchedData[matchedData.length - 1];
+      const yPos = valueToY(lastPoint.value);
+
+      // Draw background for current value (color based on sign)
+      ctx.fillStyle = lastPoint.value >= 0 ? '#22c55e' : '#ef4444';
+      ctx.fillRect(right, yPos - 9, this.margin.right, 18);
+
+      // Draw text
+      ctx.fillStyle = '#fff'; // White text
+      ctx.font = 'bold 10px system-ui';
+      ctx.fillText(formatPct(lastPoint.value), right + 3, yPos);
     }
 
     ctx.restore();

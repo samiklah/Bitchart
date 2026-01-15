@@ -21,6 +21,10 @@ export declare class Scales {
     private cvdHeightRatio;
     private deltaTableHeight;
     private footprintStyle;
+    private showOI;
+    private oiHeightRatio;
+    private showFundingRate;
+    private fundingRateHeightRatio;
     private cachedLadderTop;
     private ladderTopDirty;
     /**
@@ -36,6 +40,10 @@ export declare class Scales {
      * @param TEXT_VIS Text visibility thresholds
      * @param showCVD Whether CVD indicator is shown
      * @param cvdHeightRatio Ratio of total height used for CVD
+     * @param showOI Whether OI indicator is shown
+     * @param oiHeightRatio Ratio of total height used for OI
+     * @param showFundingRate Whether funding rate indicator is shown
+     * @param fundingRateHeightRatio Ratio of total height used for funding rate
      */
     constructor(data: CandleData[], margin: {
         top: number;
@@ -51,8 +59,8 @@ export declare class Scales {
         minZoomX: number;
         minRowPx: number;
         minBoxPx: number;
-    }, showCVD?: boolean, cvdHeightRatio?: number, deltaTableHeight?: number, footprintStyle?: 'bid_ask' | 'delta');
-    /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
+    }, showCVD?: boolean, cvdHeightRatio?: number, deltaTableHeight?: number, footprintStyle?: 'bid_ask' | 'delta', showOI?: boolean, oiHeightRatio?: number, showFundingRate?: boolean, fundingRateHeightRatio?: number);
+    /** Returns the height of the main price chart area in pixels (excluding margins and indicators). */
     chartHeight(): number;
     /** Returns the height of the CVD pane. */
     cvdHeight(): number;
@@ -60,6 +68,16 @@ export declare class Scales {
     getDeltaTableHeight(): number;
     /** Returns the Y coordinate where the CVD pane starts. */
     cvdOriginY(): number;
+    /** Returns the height of the OI pane. */
+    oiHeight(): number;
+    /** Returns the Y coordinate where the OI pane starts. */
+    oiOriginY(): number;
+    /** Returns the height of the Funding Rate pane. */
+    fundingRateHeight(): number;
+    /** Returns the Y coordinate where the Funding Rate pane starts. */
+    fundingRateOriginY(): number;
+    /** Returns the total height reserved for all indicator panes. */
+    private indicatorsPaneHeight;
     /** Maps a CVD value to a Y coordinate within the CVD pane. */
     cvdToY(value: number, min: number, max: number): number;
     /** Returns the margin configuration. */

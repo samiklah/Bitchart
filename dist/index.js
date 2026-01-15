@@ -116,8 +116,12 @@
          * @param TEXT_VIS Text visibility thresholds
          * @param showCVD Whether CVD indicator is shown
          * @param cvdHeightRatio Ratio of total height used for CVD
+         * @param showOI Whether OI indicator is shown
+         * @param oiHeightRatio Ratio of total height used for OI
+         * @param showFundingRate Whether funding rate indicator is shown
+         * @param fundingRateHeightRatio Ratio of total height used for funding rate
          */
-        constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS, showCVD = false, cvdHeightRatio = 0.2, deltaTableHeight = 0, footprintStyle = 'bid_ask') {
+        constructor(data, margin, view, canvasWidth, canvasHeight, showVolumeFootprint, TICK, baseRowPx, TEXT_VIS, showCVD = false, cvdHeightRatio = 0.2, deltaTableHeight = 0, footprintStyle = 'bid_ask', showOI = false, oiHeightRatio = 0.15, showFundingRate = false, fundingRateHeightRatio = 0.1) {
             this.data = [];
             // Cached ladderTop to prevent recalculation on every access
             this.cachedLadderTop = 10000;
@@ -135,15 +139,21 @@
             this.cvdHeightRatio = cvdHeightRatio;
             this.deltaTableHeight = deltaTableHeight;
             this.footprintStyle = footprintStyle;
+            this.showOI = showOI;
+            this.oiHeightRatio = oiHeightRatio;
+            this.showFundingRate = showFundingRate;
+            this.fundingRateHeightRatio = fundingRateHeightRatio;
         }
-        /** Returns the height of the main price chart area in pixels (excluding margins and CVD). */
+        /** Returns the height of the main price chart area in pixels (excluding margins and indicators). */
         chartHeight() {
             const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
-            if (!this.showCVD) {
+            const indicatorsRatio = this.indicatorsPaneHeight();
+            if (indicatorsRatio === 0) {
                 return totalHeight;
             }
-            // Reserve specific ratio for CVD, plus some gap
-            return totalHeight * (1 - this.cvdHeightRatio) - 2; // 2px gap
+            // Reserve ratio for all indicators, plus gaps
+            const numIndicators = (this.showCVD ? 1 : 0) + (this.showOI ? 1 : 0) + (this.showFundingRate ? 1 : 0);
+            return totalHeight * (1 - indicatorsRatio) - numIndicators * 2; // 2px gap per indicator
         }
         /** Returns the height of the CVD pane. */
         cvdHeight() {
@@ -159,6 +169,39 @@
         /** Returns the Y coordinate where the CVD pane starts. */
         cvdOriginY() {
             return this.margin.top + this.chartHeight() + 2; // + 2px gap
+        }
+        /** Returns the height of the OI pane. */
+        oiHeight() {
+            if (!this.showOI)
+                return 0;
+            const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
+            return totalHeight * this.oiHeightRatio;
+        }
+        /** Returns the Y coordinate where the OI pane starts. */
+        oiOriginY() {
+            return this.cvdOriginY() + this.cvdHeight() + (this.showCVD ? 2 : 0);
+        }
+        /** Returns the height of the Funding Rate pane. */
+        fundingRateHeight() {
+            if (!this.showFundingRate)
+                return 0;
+            const totalHeight = this.canvasHeight - this.margin.top - this.margin.bottom - this.deltaTableHeight;
+            return totalHeight * this.fundingRateHeightRatio;
+        }
+        /** Returns the Y coordinate where the Funding Rate pane starts. */
+        fundingRateOriginY() {
+            return this.oiOriginY() + this.oiHeight() + (this.showOI ? 2 : 0);
+        }
+        /** Returns the total height reserved for all indicator panes. */
+        indicatorsPaneHeight() {
+            let total = 0;
+            if (this.showCVD)
+                total += this.cvdHeightRatio;
+            if (this.showOI)
+                total += this.oiHeightRatio;
+            if (this.showFundingRate)
+                total += this.fundingRateHeightRatio;
+            return total;
         }
         /** Maps a CVD value to a Y coordinate within the CVD pane. */
         cvdToY(value, min, max) {
@@ -1007,38 +1050,125 @@
     /**
      * Draws the crosshair lines and labels at the current mouse position.
      */
-    function drawCrosshair(ctx, width, height, margin, crosshair, scales, data, theme) {
+    function drawCrosshair(ctx, width, height, margin, crosshair, scales, data, theme, indicatorData) {
         if (!crosshair.visible)
             return;
         const chartRight = width - margin.right;
-        const yBottom = margin.top + (height - margin.top - margin.bottom);
+        const chartHeight = scales.chartHeight();
+        const chartBottom = margin.top + chartHeight;
+        // Calculate indicator pane boundaries
+        const cvdHeight = scales.cvdHeight();
+        const oiHeight = scales.oiHeight();
+        const frHeight = scales.fundingRateHeight();
+        const cvdTop = scales.cvdOriginY();
+        const cvdBottom = cvdTop + cvdHeight;
+        const oiTop = scales.oiOriginY();
+        const oiBottom = oiTop + oiHeight;
+        const frTop = scales.fundingRateOriginY();
+        const frBottom = frTop + frHeight;
         ctx.save();
-        // Draw vertical line
+        // Determine which pane the cursor is in
+        const inMainChart = crosshair.y >= margin.top && crosshair.y <= chartBottom;
+        const inCVD = cvdHeight > 0 && crosshair.y >= cvdTop && crosshair.y <= cvdBottom;
+        const inOI = oiHeight > 0 && crosshair.y >= oiTop && crosshair.y <= oiBottom;
+        const inFR = frHeight > 0 && crosshair.y >= frTop && crosshair.y <= frBottom;
+        // Draw vertical line (through all panes)
         ctx.strokeStyle = theme.textColor || '#aaa';
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 2]);
         ctx.beginPath();
+        // Draw vertical line through all active panes
+        let vLineBottom = chartBottom;
+        if (cvdHeight > 0)
+            vLineBottom = cvdBottom;
+        if (oiHeight > 0)
+            vLineBottom = oiBottom;
+        if (frHeight > 0)
+            vLineBottom = frBottom;
         ctx.moveTo(crosshair.x, margin.top);
-        ctx.lineTo(crosshair.x, yBottom);
+        ctx.lineTo(crosshair.x, vLineBottom);
         ctx.stroke();
-        // Draw horizontal line
+        // Draw horizontal line (only in the current pane)
         ctx.beginPath();
-        ctx.moveTo(margin.left, crosshair.y);
-        ctx.lineTo(chartRight, crosshair.y);
+        if (inMainChart) {
+            ctx.moveTo(margin.left, crosshair.y);
+            ctx.lineTo(chartRight, crosshair.y);
+        }
+        else if (inCVD) {
+            ctx.moveTo(margin.left, crosshair.y);
+            ctx.lineTo(chartRight, crosshair.y);
+        }
+        else if (inOI) {
+            ctx.moveTo(margin.left, crosshair.y);
+            ctx.lineTo(chartRight, crosshair.y);
+        }
+        else if (inFR) {
+            ctx.moveTo(margin.left, crosshair.y);
+            ctx.lineTo(chartRight, crosshair.y);
+        }
         ctx.stroke();
-        // Draw price label on right side
-        const price = scales.rowIndexToPrice((crosshair.y - margin.top) / scales.rowHeightPx());
         ctx.setLineDash([]);
-        ctx.fillStyle = theme.scaleBackground || '#111';
-        ctx.fillRect(chartRight, crosshair.y - 8, margin.right, 16);
-        ctx.strokeStyle = theme.scaleBorder || '#444';
-        ctx.strokeRect(chartRight, crosshair.y - 8, margin.right, 16);
-        ctx.fillStyle = theme.textColor || '#aaa';
-        ctx.font = 'bold 12px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(scales.formatK(price), chartRight + margin.right / 2, crosshair.y);
+        // Draw value label on right side based on which pane cursor is in
+        let labelText = '';
+        let labelColor = theme.scaleBackground || '#111';
+        let textColor = theme.textColor || '#aaa';
+        if (inMainChart) {
+            // Show price
+            const price = scales.rowIndexToPrice((crosshair.y - margin.top) / scales.rowHeightPx());
+            labelText = scales.formatK(price);
+        }
+        else if (inOI && indicatorData && indicatorData.oiData.length > 0) {
+            // Show OI value - calculate based on Y position in OI pane
+            const oiMin = Math.min(...indicatorData.oiData.map(p => p.value));
+            const oiMax = Math.max(...indicatorData.oiData.map(p => p.value));
+            const range = oiMax - oiMin || 1;
+            const ratio = 1 - (crosshair.y - oiTop) / oiHeight;
+            const oiValue = oiMin + ratio * range;
+            labelText = scales.formatK(oiValue);
+            labelColor = '#ff9500'; // Orange for OI
+            textColor = '#fff';
+        }
+        else if (inFR && indicatorData && indicatorData.fundingRateData.length > 0) {
+            // Show Funding Rate value - calculate based on Y position in FR pane
+            const frMin = Math.min(...indicatorData.fundingRateData.map(p => p.value));
+            const frMax = Math.max(...indicatorData.fundingRateData.map(p => p.value));
+            const range = frMax - frMin || 0.0001;
+            const ratio = 1 - (crosshair.y - frTop) / frHeight;
+            const frValue = frMin + ratio * range;
+            labelText = (frValue * 100).toFixed(4) + '%';
+            labelColor = frValue >= 0 ? '#22c55e' : '#ef4444'; // Green/Red for FR
+            textColor = '#fff';
+        }
+        else if (inCVD && indicatorData && indicatorData.cvdValues.length > 0) {
+            // Show CVD value - calculate based on Y position in CVD pane
+            const vr = scales.getVisibleRange();
+            const visibleCVD = indicatorData.cvdValues.slice(vr.startIndex, vr.endIndex);
+            if (visibleCVD.length > 0) {
+                const cvdMin = Math.min(...visibleCVD);
+                const cvdMax = Math.max(...visibleCVD);
+                const range = cvdMax - cvdMin || 1;
+                const ratio = 1 - (crosshair.y - cvdTop) / cvdHeight;
+                const cvdValue = cvdMin + ratio * range;
+                labelText = scales.formatK(cvdValue);
+                labelColor = '#00ffff'; // Cyan for CVD
+                textColor = '#000';
+            }
+        }
+        if (labelText) {
+            ctx.font = 'bold 12px system-ui';
+            const textWidth = ctx.measureText(labelText).width;
+            const boxWidth = Math.max(textWidth + 8, margin.right);
+            ctx.fillStyle = labelColor;
+            ctx.fillRect(chartRight, crosshair.y - 8, boxWidth, 16);
+            ctx.strokeStyle = theme.scaleBorder || '#444';
+            ctx.strokeRect(chartRight, crosshair.y - 8, boxWidth, 16);
+            ctx.fillStyle = textColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, chartRight + boxWidth / 2, crosshair.y);
+        }
         // Draw time label on bottom
+        const yBottom = margin.top + (height - margin.top - margin.bottom);
         const index = scales.screenXToDataIndex(crosshair.x);
         let timeStr = '--:--';
         if (index >= 0 && index < data.length && data[index]) {
@@ -1066,25 +1196,33 @@
             return;
         const right = width - margin.right;
         const y = scales.priceToY(lastPrice);
+        // Get the chart area bounds (main chart only, excluding indicator panes)
+        const chartTop = margin.top;
+        const chartBottom = margin.top + scales.chartHeight();
+        const isInChartArea = y >= chartTop && y <= chartBottom;
         ctx.save();
-        // Draw dashed line across the chart at the last price level
-        ctx.setLineDash([5, 5]);
-        ctx.strokeStyle = theme.textColor || '#aaa';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(margin.left, y);
-        ctx.lineTo(right, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        // Draw dashed line across the chart at the last price level (only within chart area)
+        if (isInChartArea) {
+            ctx.setLineDash([5, 5]);
+            ctx.strokeStyle = theme.textColor || '#aaa';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(margin.left, y);
+            ctx.lineTo(right, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
         // Draw price label on the price bar (right side scale area)
+        // Always show the label, but clamp it to the chart area bounds
         const labelText = scales.formatK(lastPrice);
         ctx.font = 'bold 12px system-ui';
         const textWidth = ctx.measureText(labelText).width;
         const boxWidth = textWidth + 8;
         const boxHeight = 18;
-        // Position the label in the price bar area
+        // Position the label in the price bar area, clamped to chart bounds
         const boxX = right + 2;
-        const boxY = y - boxHeight / 2;
+        const labelY = Math.max(chartTop + boxHeight / 2, Math.min(chartBottom - boxHeight / 2, y));
+        const boxY = labelY - boxHeight / 2;
         // Draw background
         ctx.fillStyle = '#26a69a'; // Green background like in the image
         ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
@@ -1096,7 +1234,7 @@
         ctx.fillStyle = '#ffffff'; // White text
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(labelText, boxX + boxWidth / 2, boxY + boxHeight / 2);
+        ctx.fillText(labelText, boxX + boxWidth / 2, labelY);
         ctx.restore();
     }
 
@@ -1188,12 +1326,17 @@
         updateCVD(values) {
             this.cvdValues = values;
         }
-        constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions, cvdValues = [], showDeltaTable = false, tableRowVisibility = {}, tableRowHeight = 16, footprintStyle = 'bid_ask') {
+        constructor(ctx, data, margin, view, showGrid, showBounds, showVolumeFootprint, showVolumeHeatmap, volumeHeatmapDynamic, scales, theme, crosshair, lastPrice, interactions, cvdValues = [], showDeltaTable = false, tableRowVisibility = {}, tableRowHeight = 16, footprintStyle = 'bid_ask', showOI = false, oiHeightRatio = 0.15, showFundingRate = false, fundingRateHeightRatio = 0.1) {
             this.cvdValues = [];
             this.showDeltaTable = false;
             this.tableRowVisibility = {};
             this.tableRowHeight = 16;
             this.footprintStyle = 'bid_ask';
+            // OI and Funding Rate indicator data
+            this.oiData = [];
+            this.fundingRateData = [];
+            this.showOI = false;
+            this.showFundingRate = false;
             this.ctx = ctx;
             this.data = data;
             this.margin = margin;
@@ -1213,6 +1356,8 @@
             this.tableRowVisibility = tableRowVisibility;
             this.tableRowHeight = tableRowHeight;
             this.footprintStyle = footprintStyle;
+            this.showOI = showOI;
+            this.showFundingRate = showFundingRate;
         }
         setShowDeltaTable(show) {
             this.showDeltaTable = show;
@@ -1222,6 +1367,18 @@
         }
         updateLastPrice(price) {
             this.lastPrice = price;
+        }
+        updateOIData(data) {
+            this.oiData = data;
+        }
+        updateFundingRateData(data) {
+            this.fundingRateData = data;
+        }
+        setShowOI(show) {
+            this.showOI = show;
+        }
+        setShowFundingRate(show) {
+            this.showFundingRate = show;
         }
         drawAll() {
             const width = this.ctx.canvas.width / window.devicePixelRatio;
@@ -1234,13 +1391,21 @@
             this.drawChart();
             if (this.scales.cvdHeight() > 0)
                 this.drawCVD();
+            if (this.scales.oiHeight() > 0)
+                this.drawOI();
+            if (this.scales.fundingRateHeight() > 0)
+                this.drawFundingRate();
             if (this.showDeltaTable)
                 this.drawDeltaTable();
             drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
             this.drawScales(width, height);
             drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
             if (this.crosshair.visible)
-                drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme);
+                drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme, {
+                    oiData: this.oiData,
+                    fundingRateData: this.fundingRateData,
+                    cvdValues: this.cvdValues
+                });
             if (this.showBounds)
                 drawBounds(this.ctx, width, height, this.margin, this.scales);
         }
@@ -1563,6 +1728,298 @@
                 if (yPos >= originY + 8 && yPos <= originY + h - 8) {
                     ctx.fillText(this.scales.formatK(value), right + 5, yPos);
                 }
+            }
+            ctx.restore();
+        }
+        drawOI() {
+            const h = this.scales.oiHeight();
+            if (h <= 0 || this.oiData.length === 0)
+                return;
+            const ctx = this.ctx;
+            const originY = this.scales.oiOriginY();
+            const width = this.ctx.canvas.width / window.devicePixelRatio;
+            const vr = this.scales.getVisibleRange();
+            // Calculate candle interval from data (for matching tolerance)
+            let candleIntervalMs = 60000; // Default 1 minute
+            if (this.data.length >= 2) {
+                const t1 = new Date(this.data[0].time).getTime();
+                const t2 = new Date(this.data[1].time).getTime();
+                candleIntervalMs = Math.abs(t2 - t1);
+            }
+            // Use the candle interval as matching tolerance (with some padding)
+            const matchingTolerance = candleIntervalMs + 60000;
+            // Match OI data to visible candle timestamps
+            const matchedData = [];
+            for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.data.length); i++) {
+                const candleTime = new Date(this.data[i].time).getTime();
+                // Find closest OI timestamp within matching tolerance
+                let closestValue;
+                let closestDiff = Infinity;
+                for (const point of this.oiData) {
+                    const diff = Math.abs(point.timestamp - candleTime);
+                    if (diff < closestDiff && diff < matchingTolerance) {
+                        closestDiff = diff;
+                        closestValue = point.value;
+                    }
+                }
+                // Fallback: if no match within tolerance, use closest available point
+                if (closestValue === undefined && this.oiData.length > 0) {
+                    let bestDiff = Infinity;
+                    for (const point of this.oiData) {
+                        const diff = Math.abs(point.timestamp - candleTime);
+                        if (diff < bestDiff) {
+                            bestDiff = diff;
+                            closestValue = point.value;
+                        }
+                    }
+                }
+                if (closestValue !== undefined) {
+                    matchedData.push({ index: i, value: closestValue });
+                }
+            }
+            if (matchedData.length === 0)
+                return;
+            // Determine min/max for visible data
+            let min = Infinity;
+            let max = -Infinity;
+            for (const point of matchedData) {
+                if (point.value < min)
+                    min = point.value;
+                if (point.value > max)
+                    max = point.value;
+            }
+            if (min === Infinity)
+                return;
+            const range = max - min;
+            if (range === 0) {
+                min -= 1;
+                max += 1;
+            }
+            else {
+                const pad = range * 0.1;
+                min -= pad;
+                max += pad;
+            }
+            // Helper to map value to Y within the OI pane
+            const valueToY = (value) => {
+                const ratio = (value - min) / (max - min);
+                return originY + h - ratio * h;
+            };
+            // Draw divider line
+            ctx.save();
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(this.margin.left, originY);
+            ctx.lineTo(width - this.margin.right, originY);
+            ctx.stroke();
+            ctx.restore();
+            // Draw background
+            ctx.save();
+            ctx.fillStyle = this.theme.background || '#000';
+            ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            // Clip
+            ctx.beginPath();
+            ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            ctx.clip();
+            // Draw OI Line (orange color) - aligned to candle positions
+            ctx.strokeStyle = '#ff9500';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let first = true;
+            for (const point of matchedData) {
+                const x = this.scales.indexToX(point.index, vr.startIndex);
+                const y = valueToY(point.value);
+                if (first) {
+                    ctx.moveTo(x, y);
+                    first = false;
+                }
+                else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            ctx.restore();
+            // Draw OI Y-Axis Labels Area
+            const right = width - this.margin.right;
+            ctx.save();
+            ctx.fillStyle = this.theme.scaleBackground || '#111';
+            ctx.fillRect(right, originY, this.margin.right, h);
+            ctx.strokeStyle = this.theme.scaleBorder || '#444';
+            ctx.strokeRect(right + 0.5, originY, 0.5, h);
+            // Labels
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.font = '10px system-ui';
+            // 1. Draw Max Label (Top)
+            ctx.fillStyle = this.theme.textColor || '#aaa';
+            ctx.fillText(this.scales.formatK(max), right + 5, originY + 10);
+            // 2. Draw Min Label (Bottom)
+            ctx.fillStyle = this.theme.textColor || '#aaa';
+            ctx.fillText(this.scales.formatK(min), right + 5, originY + h - 10);
+            // 3. Draw Current Value Label (if we have data)
+            if (matchedData.length > 0) {
+                const lastPoint = matchedData[matchedData.length - 1];
+                const yPos = valueToY(lastPoint.value);
+                // Draw background for current value
+                ctx.fillStyle = '#ff9500';
+                ctx.fillRect(right, yPos - 9, this.margin.right, 18);
+                // Draw text
+                ctx.fillStyle = '#fff'; // White text on orange background
+                ctx.font = 'bold 10px system-ui';
+                ctx.fillText(this.scales.formatK(lastPoint.value), right + 5, yPos);
+            }
+            ctx.restore();
+        }
+        drawFundingRate() {
+            const h = this.scales.fundingRateHeight();
+            if (h <= 0 || this.fundingRateData.length === 0)
+                return;
+            const ctx = this.ctx;
+            const originY = this.scales.fundingRateOriginY();
+            const width = this.ctx.canvas.width / window.devicePixelRatio;
+            const vr = this.scales.getVisibleRange();
+            // Calculate candle interval from data (for matching tolerance)
+            let candleIntervalMs = 60000; // Default 1 minute
+            if (this.data.length >= 2) {
+                const t1 = new Date(this.data[0].time).getTime();
+                const t2 = new Date(this.data[1].time).getTime();
+                candleIntervalMs = Math.abs(t2 - t1);
+            }
+            // Use the candle interval as matching tolerance (with some padding)
+            const matchingTolerance = candleIntervalMs + 60000;
+            // Match Funding Rate data to visible candle timestamps
+            const matchedData = [];
+            for (let i = vr.startIndex; i < Math.min(vr.endIndex, this.data.length); i++) {
+                const candleTime = new Date(this.data[i].time).getTime();
+                // Find closest FR timestamp within matching tolerance
+                let closestValue;
+                let closestDiff = Infinity;
+                for (const point of this.fundingRateData) {
+                    const diff = Math.abs(point.timestamp - candleTime);
+                    if (diff < closestDiff && diff < matchingTolerance) {
+                        closestDiff = diff;
+                        closestValue = point.value;
+                    }
+                }
+                // Fallback: if no match within tolerance, use closest available point
+                if (closestValue === undefined && this.fundingRateData.length > 0) {
+                    let bestDiff = Infinity;
+                    for (const point of this.fundingRateData) {
+                        const diff = Math.abs(point.timestamp - candleTime);
+                        if (diff < bestDiff) {
+                            bestDiff = diff;
+                            closestValue = point.value;
+                        }
+                    }
+                }
+                if (closestValue !== undefined) {
+                    matchedData.push({ index: i, value: closestValue });
+                }
+            }
+            if (matchedData.length === 0)
+                return;
+            // Determine min/max for visible data
+            let min = Infinity;
+            let max = -Infinity;
+            for (const point of matchedData) {
+                if (point.value < min)
+                    min = point.value;
+                if (point.value > max)
+                    max = point.value;
+            }
+            if (min === Infinity)
+                return;
+            const range = max - min;
+            if (range === 0) {
+                min -= 0.0001;
+                max += 0.0001;
+            }
+            else {
+                const pad = range * 0.1;
+                min -= pad;
+                max += pad;
+            }
+            // Helper to map value to Y within the Funding Rate pane
+            const valueToY = (value) => {
+                const ratio = (value - min) / (max - min);
+                return originY + h - ratio * h;
+            };
+            // Draw divider line
+            ctx.save();
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(this.margin.left, originY);
+            ctx.lineTo(width - this.margin.right, originY);
+            ctx.stroke();
+            ctx.restore();
+            // Draw background
+            ctx.save();
+            ctx.fillStyle = this.theme.background || '#000';
+            ctx.fillRect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            // Clip
+            ctx.beginPath();
+            ctx.rect(this.margin.left, originY, width - this.margin.left - this.margin.right, h);
+            ctx.clip();
+            // Draw zero line if in range
+            if (min < 0 && max > 0) {
+                const yZero = valueToY(0);
+                ctx.strokeStyle = '#444';
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(this.margin.left, yZero);
+                ctx.lineTo(width - this.margin.right, yZero);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            // Draw Funding Rate as bars (green positive, red negative) - aligned to candle positions
+            const spacing = this.scales.scaledSpacing();
+            const barWidth = Math.max(2, spacing * 0.6);
+            const yZero = valueToY(0);
+            for (const point of matchedData) {
+                const x = this.scales.indexToX(point.index, vr.startIndex) - barWidth / 2;
+                const y = valueToY(point.value);
+                const barHeight = Math.abs(yZero - y);
+                ctx.fillStyle = point.value >= 0 ? '#22c55e' : '#ef4444';
+                if (point.value >= 0) {
+                    ctx.fillRect(x, y, barWidth, barHeight);
+                }
+                else {
+                    ctx.fillRect(x, yZero, barWidth, barHeight);
+                }
+            }
+            ctx.restore();
+            // Draw Funding Rate Y-Axis Labels Area
+            const right = width - this.margin.right;
+            ctx.save();
+            ctx.fillStyle = this.theme.scaleBackground || '#111';
+            ctx.fillRect(right, originY, this.margin.right, h);
+            ctx.strokeStyle = this.theme.scaleBorder || '#444';
+            ctx.strokeRect(right + 0.5, originY, 0.5, h);
+            // Labels header
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.font = '10px system-ui';
+            // Helper to format percentage
+            const formatPct = (v) => (v * 100).toFixed(4) + '%';
+            // 1. Draw Max Label (Top)
+            ctx.fillStyle = this.theme.textColor || '#aaa';
+            ctx.fillText(formatPct(max), right + 3, originY + 10);
+            // 2. Draw Min Label (Bottom)
+            ctx.fillStyle = this.theme.textColor || '#aaa';
+            ctx.fillText(formatPct(min), right + 3, originY + h - 10);
+            // 3. Draw Current Value Label (if we have data)
+            if (matchedData.length > 0) {
+                const lastPoint = matchedData[matchedData.length - 1];
+                const yPos = valueToY(lastPoint.value);
+                // Draw background for current value (color based on sign)
+                ctx.fillStyle = lastPoint.value >= 0 ? '#22c55e' : '#ef4444';
+                ctx.fillRect(right, yPos - 9, this.margin.right, 18);
+                // Draw text
+                ctx.fillStyle = '#fff'; // White text
+                ctx.font = 'bold 10px system-ui';
+                ctx.fillText(formatPct(lastPoint.value), right + 3, yPos);
             }
             ctx.restore();
         }
@@ -2036,6 +2493,27 @@
                 fpSection.appendChild(label);
             });
             editPopup.appendChild(fpSection);
+            // Indicators Section
+            const indicatorSection = document.createElement('div');
+            indicatorSection.style.marginTop = '12px';
+            indicatorSection.style.borderTop = '1px solid #444';
+            indicatorSection.style.paddingTop = '12px';
+            indicatorSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Indicators</div>';
+            [
+                { id: 'showOI', label: 'Show Open Interest' },
+                { id: 'showFundingRate', label: 'Show Funding Rate' }
+            ].forEach(opt => {
+                const label = document.createElement('label');
+                label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = opt.id;
+                checkbox.style.marginRight = '8px';
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(opt.label));
+                indicatorSection.appendChild(label);
+            });
+            editPopup.appendChild(indicatorSection);
             editContainer.appendChild(editPopup);
             topToolbar.appendChild(editContainer);
             const hint = document.createElement('span');
@@ -2112,7 +2590,7 @@
          * @param chartContainer The chart container element
          */
         initializeOptions(options, container, chartContainer) {
-            var _a, _b, _c, _d, _e, _f, _g;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
             this.options = {
                 width: options.width || container.clientWidth || 800,
                 height: options.height || (chartContainer ? chartContainer.clientHeight : container.clientHeight) || 600,
@@ -2145,7 +2623,11 @@
                     hlRange: true
                 },
                 tableRowHeight: options.tableRowHeight || 16,
-                footprintStyle: options.footprintStyle || 'bid_ask'
+                footprintStyle: options.footprintStyle || 'bid_ask',
+                showOI: (_h = options.showOI) !== null && _h !== void 0 ? _h : false,
+                oiHeightRatio: options.oiHeightRatio || 0.15,
+                showFundingRate: (_j = options.showFundingRate) !== null && _j !== void 0 ? _j : false,
+                fundingRateHeightRatio: options.fundingRateHeightRatio || 0.1
             };
             this.margin = this.options.margin;
             this.showGrid = this.options.showGrid;
@@ -2156,6 +2638,8 @@
             this.volumeHeatmapDynamic = this.options.volumeHeatmapDynamic;
             this.showCVD = this.options.showCVD;
             this.cvdType = this.options.cvdType;
+            this.showOI = (_k = this.options.showOI) !== null && _k !== void 0 ? _k : false;
+            this.showFundingRate = (_l = this.options.showFundingRate) !== null && _l !== void 0 ? _l : false;
             this.view.zoomX = this.options.initialZoomX;
             this.view.zoomY = this.options.initialZoomY;
         }
@@ -2163,8 +2647,8 @@
          * Initializes the chart modules (Scales, Interactions, Drawing).
          */
         initializeModules() {
-            var _a, _b;
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle);
+            var _a, _b, _c, _d, _e, _f;
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_b = this.options.oiHeightRatio) !== null && _b !== void 0 ? _b : 0.15, this.showFundingRate, (_c = this.options.fundingRateHeightRatio) !== null && _c !== void 0 ? _c : 0.1);
             this.interactions = new Interactions(this.canvas, this.margin, this.view, {
                 ...this.events,
                 onPan: () => {
@@ -2193,7 +2677,7 @@
                     }
                 }
             }, this.crosshair, this.scales);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16, this.options.footprintStyle);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_d = this.options.tableRowHeight) !== null && _d !== void 0 ? _d : 16, this.options.footprintStyle, this.showOI, (_e = this.options.oiHeightRatio) !== null && _e !== void 0 ? _e : 0.15, this.showFundingRate, (_f = this.options.fundingRateHeightRatio) !== null && _f !== void 0 ? _f : 0.1);
         }
         constructor(container, options = {}, events = {}) {
             this.data = [];
@@ -2235,6 +2719,12 @@
             // Edit settings popup state
             this.editBtn = null;
             this.editPopup = null;
+            // Open Interest indicator state
+            this.showOI = false;
+            this.oiData = [];
+            // Funding Rate indicator state
+            this.showFundingRate = false;
+            this.fundingRateData = [];
             // Constants
             this.TICK = 10;
             this.BASE_CANDLE = 15;
@@ -2431,6 +2921,26 @@
                         this.updateOptions({ footprintStyle });
                     });
                 });
+                // OI indicator checkbox handler
+                const oiCheckbox = this.editPopup.querySelector('#showOI');
+                if (oiCheckbox) {
+                    oiCheckbox.checked = this.showOI;
+                    oiCheckbox.addEventListener('change', () => {
+                        this.showOI = oiCheckbox.checked;
+                        this.drawing.setShowOI(this.showOI);
+                        this.updateOptions({ showOI: this.showOI });
+                    });
+                }
+                // Funding Rate indicator checkbox handler
+                const frCheckbox = this.editPopup.querySelector('#showFundingRate');
+                if (frCheckbox) {
+                    frCheckbox.checked = this.showFundingRate;
+                    frCheckbox.addEventListener('change', () => {
+                        this.showFundingRate = frCheckbox.checked;
+                        this.drawing.setShowFundingRate(this.showFundingRate);
+                        this.updateOptions({ showFundingRate: this.showFundingRate });
+                    });
+                }
                 // Close popup when clicking outside
                 document.addEventListener('click', (e) => {
                     var _a, _b;
@@ -2449,21 +2959,28 @@
             this.interactions.handlePointerDown(e);
         }
         layout() {
-            var _a, _b;
+            var _a, _b, _c, _d, _e, _f;
             const container = this.canvas.parentElement;
             if (container) {
                 this.options.width = container.clientWidth || this.options.width;
                 this.options.height = container.clientHeight || this.options.height;
             }
             // Recreate scales and drawing with new dimensions
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16, this.options.footprintStyle);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_b = this.options.oiHeightRatio) !== null && _b !== void 0 ? _b : 0.15, this.showFundingRate, (_c = this.options.fundingRateHeightRatio) !== null && _c !== void 0 ? _c : 0.1);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_d = this.options.tableRowHeight) !== null && _d !== void 0 ? _d : 16, this.options.footprintStyle, this.showOI, (_e = this.options.oiHeightRatio) !== null && _e !== void 0 ? _e : 0.15, this.showFundingRate, (_f = this.options.fundingRateHeightRatio) !== null && _f !== void 0 ? _f : 0.1);
+            // Pass stored indicator data to the new Drawing instance
+            if (this.oiData.length > 0) {
+                this.drawing.updateOIData(this.oiData);
+            }
+            if (this.fundingRateData.length > 0) {
+                this.drawing.updateFundingRateData(this.fundingRateData);
+            }
             this.setupCanvas();
             this.drawing.drawAll();
         }
         // Public API
         setData(data) {
-            var _a, _b;
+            var _a, _b, _c, _d, _e, _f;
             this.data = data;
             // Store data in aggregator as base 1m data for aggregation support
             // Only store if this is NOT aggregated data (i.e., it's raw 1m data)
@@ -2495,7 +3012,7 @@
                 this.lastPrice = data[data.length - 1].close;
             }
             // Update scales with new data
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_b = this.options.oiHeightRatio) !== null && _b !== void 0 ? _b : 0.15, this.showFundingRate, (_c = this.options.fundingRateHeightRatio) !== null && _c !== void 0 ? _c : 0.1);
             // Invalidate ladderTop cache when tick size changes
             if (this.TICK !== this.options.tickSize) {
                 this.TICK = this.options.tickSize || this.TICK;
@@ -2520,11 +3037,18 @@
             console.log('setData: calling calculateCVD');
             this.calculateCVD();
             console.log('setData: CVD values calculated, length:', this.cvdValues.length);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_b = this.options.tableRowHeight) !== null && _b !== void 0 ? _b : 16, this.options.footprintStyle);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_d = this.options.tableRowHeight) !== null && _d !== void 0 ? _d : 16, this.options.footprintStyle, this.showOI, (_e = this.options.oiHeightRatio) !== null && _e !== void 0 ? _e : 0.15, this.showFundingRate, (_f = this.options.fundingRateHeightRatio) !== null && _f !== void 0 ? _f : 0.1);
+            // Pass stored indicator data to the new Drawing instance
+            if (this.oiData.length > 0) {
+                this.drawing.updateOIData(this.oiData);
+            }
+            if (this.fundingRateData.length > 0) {
+                this.drawing.updateFundingRateData(this.fundingRateData);
+            }
             this.drawing.drawAll();
         }
         updateOptions(options) {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
             const oldShowVolumeFootprint = this.showVolumeFootprint;
             const oldCvdType = this.cvdType;
             Object.assign(this.options, options);
@@ -2536,6 +3060,8 @@
             this.volumeHeatmapDynamic = (_a = this.options.volumeHeatmapDynamic) !== null && _a !== void 0 ? _a : this.volumeHeatmapDynamic;
             this.showCVD = (_b = this.options.showCVD) !== null && _b !== void 0 ? _b : this.showCVD;
             this.cvdType = (_c = this.options.cvdType) !== null && _c !== void 0 ? _c : 'ticker';
+            this.showOI = (_d = this.options.showOI) !== null && _d !== void 0 ? _d : this.showOI;
+            this.showFundingRate = (_e = this.options.showFundingRate) !== null && _e !== void 0 ? _e : this.showFundingRate;
             // const oldCvdDynamic = this.cvdDynamic; // Wait, options doesn't have cvdDynamic directly exposed in interface? 
             // Types interface says: volumeHeatmapDynamic... wait, VFCOptions doesn't have cvdDynamic?
             // Let's check src/types.ts
@@ -2555,14 +3081,21 @@
                 this.view.offsetX = startIndex * newSpacing;
             }
             // Recreate Scales first, then Drawing
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_d = this.options.cvdHeightRatio) !== null && _d !== void 0 ? _d : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_f = this.options.cvdHeightRatio) !== null && _f !== void 0 ? _f : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_g = this.options.oiHeightRatio) !== null && _g !== void 0 ? _g : 0.15, this.showFundingRate, (_h = this.options.fundingRateHeightRatio) !== null && _h !== void 0 ? _h : 0.1);
             // Recalculate CVD if needed (e.g. type changed, or just to be safe with new scales)
             if (this.showCVD) {
                 this.calculateCVD();
             }
             // Update Interactions with the new Scales instance
             this.interactions.setScales(this.scales);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_e = this.options.tableRowHeight) !== null && _e !== void 0 ? _e : 16, this.options.footprintStyle);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_j = this.options.tableRowHeight) !== null && _j !== void 0 ? _j : 16, this.options.footprintStyle, this.showOI, (_k = this.options.oiHeightRatio) !== null && _k !== void 0 ? _k : 0.15, this.showFundingRate, (_l = this.options.fundingRateHeightRatio) !== null && _l !== void 0 ? _l : 0.1);
+            // Pass stored indicator data to the new Drawing instance
+            if (this.oiData.length > 0) {
+                this.drawing.updateOIData(this.oiData);
+            }
+            if (this.fundingRateData.length > 0) {
+                this.drawing.updateFundingRateData(this.fundingRateData);
+            }
             this.layout();
         }
         resize(width, height) {
@@ -2671,7 +3204,7 @@
         }
         // Public method to add new candle data for streaming updates (O(1))
         addCandle(candle) {
-            var _a, _b, _c;
+            var _a, _b, _c, _d, _e, _f, _g;
             this.data.push(candle);
             // Calculate CVD for new candle (O(1) update)
             const lastCVD = this.cvdValues.length > 0 ? this.cvdValues[this.cvdValues.length - 1] : 0;
@@ -2707,8 +3240,15 @@
             }
             this.cvdValues.push(normalizedCVD);
             // Update scales and redraw
-            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_b = this.options.cvdHeightRatio) !== null && _b !== void 0 ? _b : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_c = this.options.tableRowHeight) !== null && _c !== void 0 ? _c : 16);
+            this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_b = this.options.cvdHeightRatio) !== null && _b !== void 0 ? _b : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_c = this.options.oiHeightRatio) !== null && _c !== void 0 ? _c : 0.15, this.showFundingRate, (_d = this.options.fundingRateHeightRatio) !== null && _d !== void 0 ? _d : 0.1);
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_e = this.options.tableRowHeight) !== null && _e !== void 0 ? _e : 16, this.options.footprintStyle, this.showOI, (_f = this.options.oiHeightRatio) !== null && _f !== void 0 ? _f : 0.15, this.showFundingRate, (_g = this.options.fundingRateHeightRatio) !== null && _g !== void 0 ? _g : 0.1);
+            // Pass stored indicator data to the new Drawing instance
+            if (this.oiData.length > 0) {
+                this.drawing.updateOIData(this.oiData);
+            }
+            if (this.fundingRateData.length > 0) {
+                this.drawing.updateFundingRateData(this.fundingRateData);
+            }
             this.drawing.drawAll();
         }
         updateButtonText() {
@@ -2850,6 +3390,70 @@
         // Getters for API access
         getOptions() { return this.options; }
         getShowGrid() { return this.showGrid; }
+        /**
+         * Set Open Interest data for the indicator
+         * @param data Array of { timestamp: number, value: number }
+         * @param replace If true, replaces existing data. If false (default), merges with existing data.
+         */
+        setOIData(data, replace = false) {
+            if (replace) {
+                this.oiData = data;
+            }
+            else {
+                this.oiData = this.mergeData(this.oiData, data);
+            }
+            // Always update Drawing with data (so it's available when user enables indicator)
+            this.drawing.updateOIData(this.oiData);
+            // Only redraw if indicator is visible
+            if (this.showOI) {
+                this.drawing.drawAll();
+            }
+        }
+        /**
+         * Set Funding Rate data for the indicator
+         * @param data Array of { timestamp: number, value: number }
+         * @param replace If true, replaces existing data. If false (default), merges with existing data.
+         */
+        setFundingRateData(data, replace = false) {
+            if (replace) {
+                this.fundingRateData = data;
+            }
+            else {
+                this.fundingRateData = this.mergeData(this.fundingRateData, data);
+            }
+            // Always update Drawing with data (so it's available when user enables indicator)
+            this.drawing.updateFundingRateData(this.fundingRateData);
+            // Only redraw if indicator is visible
+            if (this.showFundingRate) {
+                this.drawing.drawAll();
+            }
+        }
+        /** Get current OI data */
+        getOIData() { return this.oiData; }
+        /** Get current funding rate data */
+        getFundingRateData() { return this.fundingRateData; }
+        // Helper to merge time-series data
+        mergeData(current, incoming) {
+            if (!current || current.length === 0)
+                return incoming;
+            if (!incoming || incoming.length === 0)
+                return current;
+            const map = new Map();
+            // Performance optimization: if incoming is strictly after current, just concat
+            const lastCurrent = current[current.length - 1];
+            const firstIncoming = incoming[0];
+            if (firstIncoming.timestamp > lastCurrent.timestamp) {
+                return [...current, ...incoming];
+            }
+            // Otherwise full merge
+            for (const item of current) {
+                map.set(item.timestamp, item);
+            }
+            for (const item of incoming) {
+                map.set(item.timestamp, item);
+            }
+            return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
+        }
     }
 
     class VolumeFootprintSeriesApi {

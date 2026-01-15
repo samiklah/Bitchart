@@ -41,6 +41,10 @@ export declare class Chart {
     private deltaTableBtn;
     private editBtn;
     private editPopup;
+    private showOI;
+    private oiData;
+    private showFundingRate;
+    private fundingRateData;
     private TICK;
     private detectTickSize;
     private readonly BASE_CANDLE;
@@ -109,4 +113,33 @@ export declare class Chart {
     update1mCandle(candle: CandleData): void;
     getOptions(): Required<VFCOptions>;
     getShowGrid(): boolean;
+    /**
+     * Set Open Interest data for the indicator
+     * @param data Array of { timestamp: number, value: number }
+     * @param replace If true, replaces existing data. If false (default), merges with existing data.
+     */
+    setOIData(data: {
+        timestamp: number;
+        value: number;
+    }[], replace?: boolean): void;
+    /**
+     * Set Funding Rate data for the indicator
+     * @param data Array of { timestamp: number, value: number }
+     * @param replace If true, replaces existing data. If false (default), merges with existing data.
+     */
+    setFundingRateData(data: {
+        timestamp: number;
+        value: number;
+    }[], replace?: boolean): void;
+    /** Get current OI data */
+    getOIData(): {
+        timestamp: number;
+        value: number;
+    }[];
+    /** Get current funding rate data */
+    getFundingRateData(): {
+        timestamp: number;
+        value: number;
+    }[];
+    private mergeData;
 }
