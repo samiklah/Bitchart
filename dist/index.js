@@ -224,7 +224,7 @@
         /** Returns the scaled spacing between candles, depending on volume footprint mode. */
         scaledSpacing() {
             if (!this.showVolumeFootprint) {
-                return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
+                return (10 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
             }
             if (this.footprintStyle === 'delta') {
                 // Reduced spacing for delta mode (only right-side bars)
@@ -234,7 +234,7 @@
             return 132 * this.view.zoomX; // Standard spacing (Candle + 2 * Box + gaps)
         }
         scaledCandle() {
-            return 15 * this.view.zoomX; // BASE_CANDLE * zoomX
+            return 10 * this.view.zoomX; // BASE_CANDLE * zoomX
         }
         scaledBox() {
             return 55 * this.view.zoomX; // BASE_BOX * zoomX

@@ -174,7 +174,7 @@ export class Scales {
   /** Returns the scaled spacing between candles, depending on volume footprint mode. */
   scaledSpacing(): number {
     if (!this.showVolumeFootprint) {
-      return (15 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
+      return (10 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
     }
     if (this.footprintStyle === 'delta') {
       // Reduced spacing for delta mode (only right-side bars)
@@ -185,7 +185,7 @@ export class Scales {
   }
 
   scaledCandle(): number {
-    return 15 * this.view.zoomX; // BASE_CANDLE * zoomX
+    return 10 * this.view.zoomX; // BASE_CANDLE * zoomX
   }
 
   scaledBox(): number {
