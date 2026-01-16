@@ -3638,5 +3638,632 @@ function createChart(container, options) {
     return new ChartApi(container, options);
 }
 
-export { Aggregator, Chart, Drawing, Interactions, Scales, Chart as VFC, createChart };
+/**
+ * Canvas renderer for the Depth of Market (DOM) component.
+ * Handles all drawing operations for the DOM ladder.
+ */
+/**
+ * Default theme for the DOM.
+ */
+const DEFAULT_THEME = {
+    background: '#181a1f',
+    rowBackgroundEven: '#1a1c21',
+    rowBackgroundOdd: '#1e2025',
+    headerBackground: '#111113',
+    textColor: '#e0e0e0',
+    headerTextColor: '#aaaaaa',
+    bidColor: '#26a69a',
+    askColor: '#ef5350',
+    deltaPositive: '#26a69a',
+    deltaNegative: '#ef5350',
+    midPriceColor: '#4caf50',
+    atBidColor: '#2196f3',
+    atAskColor: '#ef5350',
+    gridColor: '#333333',
+    priceColumnBackground: '#252830',
+};
+/**
+ * DOMRenderer handles all canvas drawing for the DOM component.
+ */
+class DOMRenderer {
+    constructor(canvas, theme = {}) {
+        this.canvas = canvas;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            throw new Error('Could not get 2D context from canvas');
+        }
+        this.ctx = ctx;
+        this.theme = { ...DEFAULT_THEME, ...theme };
+        this.dpr = window.devicePixelRatio || 1;
+    }
+    /**
+     * Update the theme.
+     */
+    setTheme(theme) {
+        this.theme = { ...DEFAULT_THEME, ...theme };
+    }
+    /**
+     * Render the complete DOM view.
+     */
+    render(data, options, scrollOffset, columns) {
+        const { width, height, rowHeight, fontSize, fontFamily, showHeaders } = options;
+        const ctx = this.ctx;
+        const theme = this.theme;
+        // Clear canvas
+        ctx.fillStyle = theme.background;
+        ctx.fillRect(0, 0, width * this.dpr, height * this.dpr);
+        if (!data || data.levels.length === 0) {
+            this.renderNoData(width, height, fontSize, fontFamily);
+            return;
+        }
+        // Calculate layout
+        const headerHeight = showHeaders ? rowHeight + 4 : 0;
+        const contentHeight = height - headerHeight;
+        const visibleRows = Math.floor(contentHeight / rowHeight);
+        // Find mid-price index to center the view
+        const midPriceIndex = this.findMidPriceIndex(data.levels, data.midPrice);
+        // Calculate start index based on scroll offset and centering on mid-price
+        let startIndex = midPriceIndex - Math.floor(visibleRows / 2) + scrollOffset;
+        startIndex = Math.max(0, Math.min(startIndex, data.levels.length - visibleRows));
+        // Calculate max values for bar scaling
+        const maxBid = Math.max(...data.levels.map(l => l.bid), 1);
+        const maxAsk = Math.max(...data.levels.map(l => l.ask), 1);
+        const maxSold = Math.max(...data.levels.map(l => l.sold), 1);
+        const maxBought = Math.max(...data.levels.map(l => l.bought), 1);
+        const maxDelta = Math.max(...data.levels.map(l => Math.abs(l.delta)), 1);
+        const maxVolume = Math.max(...data.levels.map(l => l.volume), 1);
+        const maxValues = { maxBid, maxAsk, maxSold, maxBought, maxDelta, maxVolume };
+        // Render headers
+        if (showHeaders) {
+            this.renderHeaders(columns, rowHeight, fontSize, fontFamily);
+        }
+        // Render rows
+        for (let i = 0; i < visibleRows && (startIndex + i) < data.levels.length; i++) {
+            const level = data.levels[startIndex + i];
+            const y = headerHeight + i * rowHeight;
+            const isMidPrice = Math.abs(level.price - data.midPrice) < 0.01;
+            this.renderRow(level, y, rowHeight, columns, maxValues, fontSize, fontFamily, i % 2 === 0, isMidPrice);
+        }
+        // Render grid lines
+        this.renderGridLines(columns, headerHeight, height);
+    }
+    /**
+     * Find the index of the price level closest to mid-price.
+     */
+    findMidPriceIndex(levels, midPrice) {
+        let closestIndex = 0;
+        let closestDiff = Infinity;
+        for (let i = 0; i < levels.length; i++) {
+            const diff = Math.abs(levels[i].price - midPrice);
+            if (diff < closestDiff) {
+                closestDiff = diff;
+                closestIndex = i;
+            }
+        }
+        return closestIndex;
+    }
+    /**
+     * Render "No Data" message.
+     */
+    renderNoData(width, height, fontSize, fontFamily) {
+        const ctx = this.ctx;
+        ctx.fillStyle = this.theme.textColor;
+        ctx.font = `${fontSize * this.dpr}px ${fontFamily}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('No DOM Data', (width * this.dpr) / 2, (height * this.dpr) / 2);
+    }
+    /**
+     * Render column headers.
+     */
+    renderHeaders(columns, rowHeight, fontSize, fontFamily) {
+        const ctx = this.ctx;
+        const theme = this.theme;
+        // Header background
+        ctx.fillStyle = theme.headerBackground;
+        let totalWidth = 0;
+        columns.forEach(col => totalWidth += col.width);
+        ctx.fillRect(0, 0, totalWidth * this.dpr, (rowHeight + 4) * this.dpr);
+        // Header text
+        ctx.fillStyle = theme.headerTextColor;
+        ctx.font = `bold ${(fontSize - 1) * this.dpr}px ${fontFamily}`;
+        let x = 0;
+        for (const col of columns) {
+            const textX = this.getTextX(x, col.width, col.align);
+            ctx.textAlign = col.align;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(col.label, textX * this.dpr, ((rowHeight + 4) / 2) * this.dpr);
+            x += col.width;
+        }
+        // Header bottom border
+        ctx.strokeStyle = theme.gridColor;
+        ctx.lineWidth = this.dpr;
+        ctx.beginPath();
+        ctx.moveTo(0, (rowHeight + 4) * this.dpr);
+        ctx.lineTo(totalWidth * this.dpr, (rowHeight + 4) * this.dpr);
+        ctx.stroke();
+    }
+    /**
+     * Render a single row.
+     */
+    renderRow(level, y, rowHeight, columns, maxValues, fontSize, fontFamily, isEven, isMidPrice) {
+        const ctx = this.ctx;
+        const theme = this.theme;
+        let x = 0;
+        for (const col of columns) {
+            // Row background
+            let bgColor = isEven ? theme.rowBackgroundEven : theme.rowBackgroundOdd;
+            if (col.id === 'price') {
+                bgColor = theme.priceColumnBackground;
+            }
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
+            // Mid-price highlight
+            if (isMidPrice) {
+                ctx.fillStyle = theme.midPriceColor + '30';
+                ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
+            }
+            // Render bar if applicable
+            if (col.getBarValue && col.barColor) {
+                const maxValue = this.getMaxValueForColumn(col.id, maxValues);
+                const barValue = col.getBarValue(level, maxValue);
+                const barWidth = (col.width - 4) * Math.min(barValue, 1);
+                if (barWidth > 0) {
+                    // Resolve bar color (can be string or function)
+                    const resolvedColor = typeof col.barColor === 'function'
+                        ? col.barColor(level)
+                        : col.barColor;
+                    ctx.fillStyle = resolvedColor + 'cc'; // Add opacity
+                    if (col.barSide === 'right') {
+                        ctx.fillRect((x + 2) * this.dpr, (y + 2) * this.dpr, barWidth * this.dpr, (rowHeight - 4) * this.dpr);
+                    }
+                    else {
+                        ctx.fillRect((x + col.width - 2 - barWidth) * this.dpr, (y + 2) * this.dpr, barWidth * this.dpr, (rowHeight - 4) * this.dpr);
+                    }
+                }
+            }
+            // Render text
+            const value = col.getValue(level);
+            if (value !== 0 && value !== '0') {
+                ctx.fillStyle = this.getTextColor(col.id, level, theme);
+                ctx.font = `${fontSize * this.dpr}px ${fontFamily}`;
+                ctx.textAlign = col.align;
+                ctx.textBaseline = 'middle';
+                const textX = this.getTextX(x, col.width, col.align);
+                const textY = y + rowHeight / 2;
+                ctx.fillText(String(value), textX * this.dpr, textY * this.dpr);
+            }
+            x += col.width;
+        }
+    }
+    /**
+     * Get max value for a column for bar scaling.
+     */
+    getMaxValueForColumn(colId, maxValues) {
+        switch (colId) {
+            case 'bidVol':
+                return maxValues.maxSold;
+            case 'askVol':
+                return maxValues.maxBought;
+            case 'bid':
+            case 'atBid':
+                return maxValues.maxBid;
+            case 'ask':
+            case 'atAsk':
+                return maxValues.maxAsk;
+            case 'deltaVol':
+                return maxValues.maxDelta;
+            case 'volume':
+                return maxValues.maxVolume;
+            default:
+                return 1;
+        }
+    }
+    /**
+     * Get text color for a column.
+     */
+    getTextColor(colId, level, theme) {
+        switch (colId) {
+            case 'atBid':
+                return theme.atBidColor; // Cyan for @Bid market orders
+            case 'atAsk':
+                return theme.atAskColor; // Red for @Ask market orders
+            case 'bidVol':
+            case 'askVol':
+            case 'bid':
+            case 'ask':
+            case 'deltaVol':
+            case 'volume':
+            case 'price':
+            default:
+                return theme.textColor; // White for all other columns
+        }
+    }
+    /**
+     * Get X position for text based on alignment.
+     */
+    getTextX(columnX, columnWidth, align) {
+        switch (align) {
+            case 'left':
+                return columnX + 4;
+            case 'right':
+                return columnX + columnWidth - 4;
+            case 'center':
+            default:
+                return columnX + columnWidth / 2;
+        }
+    }
+    /**
+     * Render vertical grid lines between columns.
+     */
+    renderGridLines(columns, headerHeight, height) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.theme.gridColor;
+        ctx.lineWidth = this.dpr;
+        let x = 0;
+        for (let i = 0; i < columns.length - 1; i++) {
+            x += columns[i].width;
+            ctx.beginPath();
+            ctx.moveTo(x * this.dpr, 0);
+            ctx.lineTo(x * this.dpr, height * this.dpr);
+            ctx.stroke();
+        }
+    }
+    /**
+     * Resize the canvas.
+     */
+    resize(width, height) {
+        this.canvas.width = width * this.dpr;
+        this.canvas.height = height * this.dpr;
+        this.canvas.style.width = `${width}px`;
+        this.canvas.style.height = `${height}px`;
+    }
+}
+
+/**
+ * DOM (Depth of Market) Component
+ *
+ * Displays a ladder-style view of bid/ask prices with volume visualization.
+ * Usage: const dom = new DOM(container, options); dom.setData(data);
+ */
+/**
+ * Default options for the DOM component.
+ */
+const DEFAULT_OPTIONS = {
+    width: 600,
+    height: 400,
+    rowHeight: 20,
+    visibleLevels: 20,
+    fontSize: 11,
+    fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+    showHeaders: true,
+    theme: DEFAULT_THEME,
+    columns: {
+        bidVol: true,
+        askVol: true,
+        bid: true,
+        atBid: true,
+        atAsk: true,
+        ask: true,
+        price: true,
+        deltaVol: true,
+        volume: true,
+    },
+};
+/**
+ * Column definitions for the DOM.
+ */
+function createColumns(theme, columnVisibility) {
+    const columns = [];
+    if (columnVisibility.bidVol) {
+        columns.push({
+            id: 'bidVol',
+            label: 'Bid Vol',
+            width: 60,
+            align: 'right',
+            getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
+            getBarValue: (level, max) => level.sold / max,
+            barColor: theme.bidColor,
+            barSide: 'left', // Bar grows from right edge toward left (inward)
+        });
+    }
+    if (columnVisibility.askVol) {
+        columns.push({
+            id: 'askVol',
+            label: 'Ask Vol',
+            width: 60,
+            align: 'left',
+            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+            getBarValue: (level, max) => level.bought / max,
+            barColor: theme.askColor,
+            barSide: 'right', // Bar grows from left edge toward right (inward)
+        });
+    }
+    if (columnVisibility.bid) {
+        columns.push({
+            id: 'bid',
+            label: 'Bid',
+            width: 60,
+            align: 'right',
+            getValue: (level) => level.bid > 0 ? formatVolume(level.bid) : '',
+            getBarValue: (level, max) => level.bid / max,
+            barColor: theme.bidColor,
+            barSide: 'left',
+        });
+    }
+    if (columnVisibility.atBid) {
+        columns.push({
+            id: 'atBid',
+            label: '@Bid',
+            width: 50,
+            align: 'right',
+            getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
+        });
+    }
+    if (columnVisibility.atAsk) {
+        columns.push({
+            id: 'atAsk',
+            label: '@Ask',
+            width: 50,
+            align: 'right',
+            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+        });
+    }
+    if (columnVisibility.ask) {
+        columns.push({
+            id: 'ask',
+            label: 'Ask',
+            width: 60,
+            align: 'left',
+            getValue: (level) => level.ask > 0 ? formatVolume(level.ask) : '',
+            getBarValue: (level, max) => level.ask / max,
+            barColor: theme.askColor,
+            barSide: 'right',
+        });
+    }
+    if (columnVisibility.price) {
+        columns.push({
+            id: 'price',
+            label: 'Price',
+            width: 80,
+            align: 'center',
+            getValue: (level) => formatPrice(level.price),
+        });
+    }
+    if (columnVisibility.deltaVol) {
+        columns.push({
+            id: 'deltaVol',
+            label: 'Delta',
+            width: 60,
+            align: 'right',
+            getValue: (level) => {
+                if (level.delta === 0)
+                    return '';
+                const prefix = level.delta > 0 ? '+' : '';
+                return prefix + formatVolume(level.delta);
+            },
+            getBarValue: (level, max) => Math.abs(level.delta) / max,
+            barColor: level => level.delta >= 0 ? theme.deltaPositive : theme.deltaNegative,
+            barSide: 'left',
+        });
+    }
+    if (columnVisibility.volume) {
+        columns.push({
+            id: 'volume',
+            label: 'Volume',
+            width: 70,
+            align: 'right',
+            getValue: (level) => level.volume > 0 ? formatVolume(level.volume) : '',
+            getBarValue: (level, max) => level.volume / max,
+            barColor: '#555555', // Dark gray bars
+            barSide: 'left',
+        });
+    }
+    return columns;
+}
+/**
+ * Format volume numbers for display.
+ */
+function formatVolume(value) {
+    if (Math.abs(value) >= 1000000) {
+        return (value / 1000000).toFixed(1) + 'M';
+    }
+    if (Math.abs(value) >= 1000) {
+        return (value / 1000).toFixed(1) + 'K';
+    }
+    return value.toFixed(value < 10 ? 2 : 0);
+}
+/**
+ * Format price for display.
+ */
+function formatPrice(price) {
+    if (price >= 1000) {
+        return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return price.toFixed(2);
+}
+/**
+ * DOM (Depth of Market) component.
+ * Displays a ladder-style view of order book and trade data.
+ */
+class DOM {
+    constructor(container, options = {}) {
+        this.data = null;
+        this.scrollOffset = 0;
+        this.animationFrameId = null;
+        this.isDragging = false;
+        this.lastY = 0;
+        this.container = container;
+        // Merge options with defaults
+        this.options = {
+            ...DEFAULT_OPTIONS,
+            ...options,
+            theme: { ...DEFAULT_THEME, ...(options.theme || {}) },
+            columns: { ...DEFAULT_OPTIONS.columns, ...(options.columns || {}) },
+        };
+        // Auto-detect dimensions from container if not specified
+        if (!options.width) {
+            this.options.width = container.clientWidth || DEFAULT_OPTIONS.width;
+        }
+        if (!options.height) {
+            this.options.height = container.clientHeight || DEFAULT_OPTIONS.height;
+        }
+        // Create columns based on theme and visibility
+        this.columns = createColumns(this.options.theme, this.options.columns);
+        // Create canvas element
+        this.canvas = document.createElement('canvas');
+        this.canvas.style.display = 'block';
+        this.canvas.style.background = this.options.theme.background || DEFAULT_THEME.background;
+        container.appendChild(this.canvas);
+        // Create renderer
+        this.renderer = new DOMRenderer(this.canvas, this.options.theme);
+        this.renderer.resize(this.options.width, this.options.height);
+        // Bind events
+        this.bindEvents();
+        // Initial render
+        this.render();
+    }
+    /**
+     * Bind mouse/touch events for scrolling.
+     */
+    bindEvents() {
+        // Mouse wheel scrolling
+        this.canvas.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
+        // Mouse drag scrolling
+        this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+        this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+        this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
+        // Touch scrolling
+        this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
+        this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
+        this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
+    }
+    handleWheel(e) {
+        e.preventDefault();
+        const delta = Math.sign(e.deltaY);
+        this.scrollOffset += delta;
+        this.render();
+    }
+    handleMouseDown(e) {
+        this.isDragging = true;
+        this.lastY = e.clientY;
+    }
+    handleMouseMove(e) {
+        if (!this.isDragging)
+            return;
+        const deltaY = this.lastY - e.clientY;
+        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
+        this.lastY = e.clientY;
+        this.render();
+    }
+    handleMouseUp() {
+        this.isDragging = false;
+    }
+    handleTouchStart(e) {
+        if (e.touches.length === 1) {
+            this.isDragging = true;
+            this.lastY = e.touches[0].clientY;
+        }
+    }
+    handleTouchMove(e) {
+        if (!this.isDragging || e.touches.length !== 1)
+            return;
+        e.preventDefault();
+        const deltaY = this.lastY - e.touches[0].clientY;
+        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
+        this.lastY = e.touches[0].clientY;
+        this.render();
+    }
+    handleTouchEnd() {
+        this.isDragging = false;
+    }
+    /**
+     * Render the DOM.
+     */
+    render() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+        this.animationFrameId = requestAnimationFrame(() => {
+            this.renderer.render(this.data, this.options, this.scrollOffset, this.columns);
+            this.animationFrameId = null;
+        });
+    }
+    /**
+     * Set or update DOM data.
+     */
+    setData(data) {
+        this.data = data;
+        this.render();
+    }
+    /**
+     * Update options.
+     */
+    updateOptions(options) {
+        this.options = {
+            ...this.options,
+            ...options,
+            theme: { ...this.options.theme, ...(options.theme || {}) },
+            columns: { ...this.options.columns, ...(options.columns || {}) },
+        };
+        // Recreate columns if visibility changed
+        if (options.columns) {
+            this.columns = createColumns(this.options.theme, this.options.columns);
+        }
+        // Update renderer theme
+        if (options.theme) {
+            this.renderer.setTheme(this.options.theme);
+        }
+        this.render();
+    }
+    /**
+     * Resize the DOM component.
+     */
+    resize(width, height) {
+        this.options.width = width;
+        this.options.height = height;
+        this.renderer.resize(width, height);
+        this.render();
+    }
+    /**
+     * Center the view on the mid-price.
+     */
+    centerOnMidPrice() {
+        this.scrollOffset = 0;
+        this.render();
+    }
+    /**
+     * Get current data.
+     */
+    getData() {
+        return this.data;
+    }
+    /**
+     * Get current options.
+     */
+    getOptions() {
+        return this.options;
+    }
+    /**
+     * Destroy the DOM component and clean up.
+     */
+    destroy() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+        // Remove event listeners
+        this.canvas.removeEventListener('wheel', this.handleWheel.bind(this));
+        this.canvas.removeEventListener('mousedown', this.handleMouseDown.bind(this));
+        this.canvas.removeEventListener('mousemove', this.handleMouseMove.bind(this));
+        this.canvas.removeEventListener('mouseup', this.handleMouseUp.bind(this));
+        this.canvas.removeEventListener('mouseleave', this.handleMouseUp.bind(this));
+        // Remove canvas from container
+        if (this.canvas.parentNode) {
+            this.canvas.parentNode.removeChild(this.canvas);
+        }
+    }
+}
+
+export { Aggregator, Chart, DOM, Drawing, Interactions, Scales, Chart as VFC, createChart };
 //# sourceMappingURL=index.mjs.map

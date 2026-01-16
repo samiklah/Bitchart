@@ -27,3 +27,7 @@ export { Aggregator, Timeframe } from './aggregator';
 
 // Export the new modular Chart class as VFC for backward compatibility
 export { Chart as VFC } from './chart';
+
+// DOM (Depth of Market) component
+export { DOM } from './dom/dom';
+export type { DOMData, DOMLevel, DOMOptions, DOMTheme } from './dom/dom-types';

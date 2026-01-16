@@ -10,3 +10,5 @@ export { Interactions } from './interactions';
 export { Drawing } from './drawing';
 export { Aggregator, Timeframe } from './aggregator';
 export { Chart as VFC } from './chart';
+export { DOM } from './dom/dom';
+export type { DOMData, DOMLevel, DOMOptions, DOMTheme } from './dom/dom-types';

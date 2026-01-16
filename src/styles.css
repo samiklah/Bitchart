@@ -113,3 +113,20 @@
   color: #fff;
   border-radius: 4px;
 }
+
+/* DOM (Depth of Market) Styles */
+.dom-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #181a1f;
+  color: #e0e0e0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.dom-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
