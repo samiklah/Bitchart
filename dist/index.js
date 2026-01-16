@@ -1114,9 +1114,9 @@
         let labelColor = theme.scaleBackground || '#111';
         let textColor = theme.textColor || '#aaa';
         if (inMainChart) {
-            // Show price
+            // Show price with commas and 2 decimal places
             const price = scales.rowIndexToPrice((crosshair.y - margin.top) / scales.rowHeightPx());
-            labelText = scales.formatK(price);
+            labelText = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         else if (inOI && indicatorData && indicatorData.oiData.length > 0) {
             // Show OI value - calculate based on Y position in OI pane
@@ -1215,7 +1215,7 @@
         }
         // Draw price label on the price bar (right side scale area)
         // Always show the label, but clamp it to the chart area bounds
-        const labelText = scales.formatK(lastPrice);
+        const labelText = lastPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         ctx.font = 'bold 12px system-ui';
         const textWidth = ctx.measureText(labelText).width;
         const boxWidth = textWidth + 8;
@@ -1454,13 +1454,74 @@
                 ctx.lineTo(width, tableY + r * rowHeight);
                 ctx.stroke();
             }
+            // First pass: Calculate max values for each row type in visible range
+            const maxValues = {
+                volume: 0,
+                buyVol: 0,
+                sellVol: 0,
+                delta: 0,
+                minDelta: 0,
+                maxDelta: 0,
+                volChange: 0,
+                buyVolPercent: 0,
+                sellVolPercent: 0,
+                deltaPercent: 0,
+                poc: 0,
+                hlRange: 0
+            };
+            let prevVolForMax = 0;
+            for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
+                const candle = this.data[i];
+                let totBuy = 0, totSell = 0;
+                let candleMinDelta = 0, candleMaxDelta = 0;
+                let poc = 0, pocVol = 0;
+                for (const level of candle.footprint) {
+                    totBuy += level.buy;
+                    totSell += level.sell;
+                    const levelDelta = level.buy - level.sell;
+                    if (levelDelta < candleMinDelta)
+                        candleMinDelta = levelDelta;
+                    if (levelDelta > candleMaxDelta)
+                        candleMaxDelta = levelDelta;
+                    const levelVol = level.buy + level.sell;
+                    if (levelVol > pocVol) {
+                        pocVol = levelVol;
+                        poc = level.price;
+                    }
+                }
+                const totalVol = totBuy + totSell;
+                const delta = totBuy - totSell;
+                const deltaPercent = totalVol > 0 ? Math.abs((delta / totalVol) * 100) : 0;
+                const buyPercent = totalVol > 0 ? (totBuy / totalVol) * 100 : 0;
+                const sellPercent = totalVol > 0 ? (totSell / totalVol) * 100 : 0;
+                const volChange = prevVolForMax > 0 ? Math.abs(((totalVol - prevVolForMax) / prevVolForMax) * 100) : 0;
+                const hlRange = candle.high - candle.low;
+                maxValues.volume = Math.max(maxValues.volume, totalVol);
+                maxValues.buyVol = Math.max(maxValues.buyVol, totBuy);
+                maxValues.sellVol = Math.max(maxValues.sellVol, totSell);
+                maxValues.delta = Math.max(maxValues.delta, Math.abs(delta));
+                maxValues.minDelta = Math.max(maxValues.minDelta, Math.abs(candleMinDelta));
+                maxValues.maxDelta = Math.max(maxValues.maxDelta, Math.abs(candleMaxDelta));
+                maxValues.volChange = Math.max(maxValues.volChange, volChange);
+                maxValues.buyVolPercent = Math.max(maxValues.buyVolPercent, buyPercent);
+                maxValues.sellVolPercent = Math.max(maxValues.sellVolPercent, sellPercent);
+                maxValues.deltaPercent = Math.max(maxValues.deltaPercent, deltaPercent);
+                maxValues.poc = Math.max(maxValues.poc, poc);
+                maxValues.hlRange = Math.max(maxValues.hlRange, hlRange);
+                prevVolForMax = totalVol;
+            }
             // Calculate previous candle volume for volume change %
             let prevVol = 0;
+            // Helper to calculate dynamic opacity (0.2 to 0.8 range based on value relative to max)
+            const getDynamicOpacity = (value, maxValue) => {
+                if (maxValue === 0)
+                    return 0.2;
+                return 0.2 + 0.6 * (Math.abs(value) / maxValue);
+            };
             // Draw values for each visible candle
             for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
                 const candle = this.data[i];
                 const cx = this.scales.indexToX(i, vr.startIndex);
-                // Calculate totals
                 // Calculate totals and min/max delta
                 let totBuy = 0, totSell = 0;
                 let minDelta = Number.MAX_SAFE_INTEGER;
@@ -1506,46 +1567,73 @@
                     let bgColor = '#2a2a2a'; // default neutral
                     let textValue = '';
                     switch (row.key) {
-                        case 'volume':
-                            bgColor = '#2a2a2a';
+                        case 'volume': {
+                            // Volume uses blue (#2196f3) with dynamic opacity
+                            const opacity = getDynamicOpacity(totalVol, maxValues.volume);
+                            bgColor = `rgba(33, 150, 243, ${opacity})`;
                             textValue = this.scales.formatK(totalVol);
                             break;
-                        case 'volChange':
-                            bgColor = i === vr.startIndex ? '#2a2a2a' : (volChange >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)');
-                            textValue = i === vr.startIndex ? '-' : `${volChange.toFixed(1)}%`;
+                        }
+                        case 'volChange': {
+                            if (i === vr.startIndex) {
+                                bgColor = '#2a2a2a';
+                                textValue = '-';
+                            }
+                            else {
+                                const opacity = getDynamicOpacity(volChange, maxValues.volChange);
+                                bgColor = volChange >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
+                                textValue = `${volChange.toFixed(1)}%`;
+                            }
                             break;
-                        case 'buyVol':
-                            bgColor = 'rgba(22, 163, 74, 0.5)';
+                        }
+                        case 'buyVol': {
+                            const opacity = getDynamicOpacity(totBuy, maxValues.buyVol);
+                            bgColor = `rgba(22, 163, 74, ${opacity})`;
                             textValue = this.scales.formatK(totBuy);
                             break;
-                        case 'buyVolPercent':
-                            bgColor = 'rgba(22, 163, 74, 0.5)';
+                        }
+                        case 'buyVolPercent': {
+                            const opacity = getDynamicOpacity(buyPercent, maxValues.buyVolPercent);
+                            bgColor = `rgba(22, 163, 74, ${opacity})`;
                             textValue = `${buyPercent.toFixed(1)}%`;
                             break;
-                        case 'sellVol':
-                            bgColor = 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'sellVol': {
+                            const opacity = getDynamicOpacity(totSell, maxValues.sellVol);
+                            bgColor = `rgba(220, 38, 38, ${opacity})`;
                             textValue = this.scales.formatK(totSell);
                             break;
-                        case 'sellVolPercent':
-                            bgColor = 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'sellVolPercent': {
+                            const opacity = getDynamicOpacity(sellPercent, maxValues.sellVolPercent);
+                            bgColor = `rgba(220, 38, 38, ${opacity})`;
                             textValue = `${sellPercent.toFixed(1)}%`;
                             break;
-                        case 'delta':
-                            bgColor = delta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'delta': {
+                            const opacity = getDynamicOpacity(delta, maxValues.delta);
+                            bgColor = delta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
                             textValue = this.scales.formatK(delta);
                             break;
-                        case 'deltaPercent':
-                            bgColor = deltaPercent >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'deltaPercent': {
+                            const opacity = getDynamicOpacity(deltaPercent, maxValues.deltaPercent);
+                            bgColor = deltaPercent >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
                             textValue = `${deltaPercent.toFixed(1)}%`;
                             break;
-                        case 'minDelta':
-                            bgColor = minDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'minDelta': {
+                            const opacity = getDynamicOpacity(minDelta, maxValues.minDelta);
+                            bgColor = minDelta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
                             textValue = this.scales.formatK(minDelta);
                             break;
-                        case 'maxDelta':
-                            bgColor = maxDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+                        }
+                        case 'maxDelta': {
+                            const opacity = getDynamicOpacity(maxDelta, maxValues.maxDelta);
+                            bgColor = maxDelta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
                             textValue = this.scales.formatK(maxDelta);
                             break;
+                        }
                         case 'poc':
                             bgColor = '#2a2a2a';
                             textValue = poc.toFixed(2);
@@ -2408,25 +2496,25 @@
             const tableSection = document.createElement('div');
             tableSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Table Rows</div>';
             const tableRows = [
-                { key: 'volume', label: 'Volume' },
-                { key: 'volChange', label: 'Vol Change %' },
-                { key: 'buyVol', label: 'Buy Volume' },
-                { key: 'buyVolPercent', label: 'Buy Vol %' },
-                { key: 'sellVol', label: 'Sell Volume' },
-                { key: 'sellVolPercent', label: 'Sell Vol %' },
-                { key: 'delta', label: 'Delta' },
-                { key: 'deltaPercent', label: 'Delta %' },
-                { key: 'minDelta', label: 'Min Delta' },
-                { key: 'maxDelta', label: 'Max Delta' },
-                { key: 'poc', label: 'POC' },
-                { key: 'hlRange', label: 'HL Range' }
+                { key: 'volume', label: 'Volume', defaultOn: true },
+                { key: 'volChange', label: 'Vol Change %', defaultOn: true },
+                { key: 'buyVol', label: 'Buy Volume', defaultOn: true },
+                { key: 'buyVolPercent', label: 'Buy Vol %', defaultOn: true },
+                { key: 'sellVol', label: 'Sell Volume', defaultOn: true },
+                { key: 'sellVolPercent', label: 'Sell Vol %', defaultOn: true },
+                { key: 'delta', label: 'Delta', defaultOn: true },
+                { key: 'deltaPercent', label: 'Delta %', defaultOn: true },
+                { key: 'minDelta', label: 'Min Delta', defaultOn: false },
+                { key: 'maxDelta', label: 'Max Delta', defaultOn: false },
+                { key: 'poc', label: 'POC', defaultOn: false },
+                { key: 'hlRange', label: 'HL Range', defaultOn: false }
             ];
             tableRows.forEach(row => {
                 const label = document.createElement('label');
                 label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.checked = true;
+                checkbox.checked = row.defaultOn;
                 checkbox.dataset.row = row.key;
                 checkbox.style.marginRight = '8px';
                 label.appendChild(checkbox);
@@ -2618,10 +2706,10 @@
                     sellVolPercent: true,
                     delta: true,
                     deltaPercent: true,
-                    minDelta: true,
-                    maxDelta: true,
-                    poc: true,
-                    hlRange: true
+                    minDelta: false,
+                    maxDelta: false,
+                    poc: false,
+                    hlRange: false
                 },
                 tableRowHeight: options.tableRowHeight || 16,
                 footprintStyle: options.footprintStyle || 'bid_ask',

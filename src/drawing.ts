@@ -202,15 +202,77 @@ export class Drawing {
       ctx.stroke();
     }
 
+    // First pass: Calculate max values for each row type in visible range
+    const maxValues: { [key: string]: number } = {
+      volume: 0,
+      buyVol: 0,
+      sellVol: 0,
+      delta: 0,
+      minDelta: 0,
+      maxDelta: 0,
+      volChange: 0,
+      buyVolPercent: 0,
+      sellVolPercent: 0,
+      deltaPercent: 0,
+      poc: 0,
+      hlRange: 0
+    };
+
+    let prevVolForMax = 0;
+    for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
+      const candle = this.data[i];
+      let totBuy = 0, totSell = 0;
+      let candleMinDelta = 0, candleMaxDelta = 0;
+      let poc = 0, pocVol = 0;
+
+      for (const level of candle.footprint) {
+        totBuy += level.buy;
+        totSell += level.sell;
+        const levelDelta = level.buy - level.sell;
+        if (levelDelta < candleMinDelta) candleMinDelta = levelDelta;
+        if (levelDelta > candleMaxDelta) candleMaxDelta = levelDelta;
+        const levelVol = level.buy + level.sell;
+        if (levelVol > pocVol) { pocVol = levelVol; poc = level.price; }
+      }
+
+      const totalVol = totBuy + totSell;
+      const delta = totBuy - totSell;
+      const deltaPercent = totalVol > 0 ? Math.abs((delta / totalVol) * 100) : 0;
+      const buyPercent = totalVol > 0 ? (totBuy / totalVol) * 100 : 0;
+      const sellPercent = totalVol > 0 ? (totSell / totalVol) * 100 : 0;
+      const volChange = prevVolForMax > 0 ? Math.abs(((totalVol - prevVolForMax) / prevVolForMax) * 100) : 0;
+      const hlRange = candle.high - candle.low;
+
+      maxValues.volume = Math.max(maxValues.volume, totalVol);
+      maxValues.buyVol = Math.max(maxValues.buyVol, totBuy);
+      maxValues.sellVol = Math.max(maxValues.sellVol, totSell);
+      maxValues.delta = Math.max(maxValues.delta, Math.abs(delta));
+      maxValues.minDelta = Math.max(maxValues.minDelta, Math.abs(candleMinDelta));
+      maxValues.maxDelta = Math.max(maxValues.maxDelta, Math.abs(candleMaxDelta));
+      maxValues.volChange = Math.max(maxValues.volChange, volChange);
+      maxValues.buyVolPercent = Math.max(maxValues.buyVolPercent, buyPercent);
+      maxValues.sellVolPercent = Math.max(maxValues.sellVolPercent, sellPercent);
+      maxValues.deltaPercent = Math.max(maxValues.deltaPercent, deltaPercent);
+      maxValues.poc = Math.max(maxValues.poc, poc);
+      maxValues.hlRange = Math.max(maxValues.hlRange, hlRange);
+
+      prevVolForMax = totalVol;
+    }
+
     // Calculate previous candle volume for volume change %
     let prevVol = 0;
+
+    // Helper to calculate dynamic opacity (0.2 to 0.8 range based on value relative to max)
+    const getDynamicOpacity = (value: number, maxValue: number): number => {
+      if (maxValue === 0) return 0.2;
+      return 0.2 + 0.6 * (Math.abs(value) / maxValue);
+    };
 
     // Draw values for each visible candle
     for (let i = vr.startIndex; i < vr.endIndex && i < this.data.length; i++) {
       const candle = this.data[i];
       const cx = this.scales.indexToX(i, vr.startIndex);
 
-      // Calculate totals
       // Calculate totals and min/max delta
       let totBuy = 0, totSell = 0;
       let minDelta = Number.MAX_SAFE_INTEGER;
@@ -265,46 +327,72 @@ export class Drawing {
         let textValue = '';
 
         switch (row.key) {
-          case 'volume':
-            bgColor = '#2a2a2a';
+          case 'volume': {
+            // Volume uses blue (#2196f3) with dynamic opacity
+            const opacity = getDynamicOpacity(totalVol, maxValues.volume);
+            bgColor = `rgba(33, 150, 243, ${opacity})`;
             textValue = this.scales.formatK(totalVol);
             break;
-          case 'volChange':
-            bgColor = i === vr.startIndex ? '#2a2a2a' : (volChange >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)');
-            textValue = i === vr.startIndex ? '-' : `${volChange.toFixed(1)}%`;
+          }
+          case 'volChange': {
+            if (i === vr.startIndex) {
+              bgColor = '#2a2a2a';
+              textValue = '-';
+            } else {
+              const opacity = getDynamicOpacity(volChange, maxValues.volChange);
+              bgColor = volChange >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
+              textValue = `${volChange.toFixed(1)}%`;
+            }
             break;
-          case 'buyVol':
-            bgColor = 'rgba(22, 163, 74, 0.5)';
+          }
+          case 'buyVol': {
+            const opacity = getDynamicOpacity(totBuy, maxValues.buyVol);
+            bgColor = `rgba(22, 163, 74, ${opacity})`;
             textValue = this.scales.formatK(totBuy);
             break;
-          case 'buyVolPercent':
-            bgColor = 'rgba(22, 163, 74, 0.5)';
+          }
+          case 'buyVolPercent': {
+            const opacity = getDynamicOpacity(buyPercent, maxValues.buyVolPercent);
+            bgColor = `rgba(22, 163, 74, ${opacity})`;
             textValue = `${buyPercent.toFixed(1)}%`;
             break;
-          case 'sellVol':
-            bgColor = 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'sellVol': {
+            const opacity = getDynamicOpacity(totSell, maxValues.sellVol);
+            bgColor = `rgba(220, 38, 38, ${opacity})`;
             textValue = this.scales.formatK(totSell);
             break;
-          case 'sellVolPercent':
-            bgColor = 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'sellVolPercent': {
+            const opacity = getDynamicOpacity(sellPercent, maxValues.sellVolPercent);
+            bgColor = `rgba(220, 38, 38, ${opacity})`;
             textValue = `${sellPercent.toFixed(1)}%`;
             break;
-          case 'delta':
-            bgColor = delta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'delta': {
+            const opacity = getDynamicOpacity(delta, maxValues.delta);
+            bgColor = delta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
             textValue = this.scales.formatK(delta);
             break;
-          case 'deltaPercent':
-            bgColor = deltaPercent >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'deltaPercent': {
+            const opacity = getDynamicOpacity(deltaPercent, maxValues.deltaPercent);
+            bgColor = deltaPercent >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
             textValue = `${deltaPercent.toFixed(1)}%`;
             break;
-          case 'minDelta':
-            bgColor = minDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'minDelta': {
+            const opacity = getDynamicOpacity(minDelta, maxValues.minDelta);
+            bgColor = minDelta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
             textValue = this.scales.formatK(minDelta);
             break;
-          case 'maxDelta':
-            bgColor = maxDelta >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)';
+          }
+          case 'maxDelta': {
+            const opacity = getDynamicOpacity(maxDelta, maxValues.maxDelta);
+            bgColor = maxDelta >= 0 ? `rgba(22, 163, 74, ${opacity})` : `rgba(220, 38, 38, ${opacity})`;
             textValue = this.scales.formatK(maxDelta);
             break;
+          }
           case 'poc':
             bgColor = '#2a2a2a';
             textValue = poc.toFixed(2);

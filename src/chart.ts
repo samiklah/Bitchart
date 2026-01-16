@@ -248,25 +248,25 @@ export class Chart {
     const tableSection = document.createElement('div');
     tableSection.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;color:#888;">Table Rows</div>';
     const tableRows = [
-      { key: 'volume', label: 'Volume' },
-      { key: 'volChange', label: 'Vol Change %' },
-      { key: 'buyVol', label: 'Buy Volume' },
-      { key: 'buyVolPercent', label: 'Buy Vol %' },
-      { key: 'sellVol', label: 'Sell Volume' },
-      { key: 'sellVolPercent', label: 'Sell Vol %' },
-      { key: 'delta', label: 'Delta' },
-      { key: 'deltaPercent', label: 'Delta %' },
-      { key: 'minDelta', label: 'Min Delta' },
-      { key: 'maxDelta', label: 'Max Delta' },
-      { key: 'poc', label: 'POC' },
-      { key: 'hlRange', label: 'HL Range' }
+      { key: 'volume', label: 'Volume', defaultOn: true },
+      { key: 'volChange', label: 'Vol Change %', defaultOn: true },
+      { key: 'buyVol', label: 'Buy Volume', defaultOn: true },
+      { key: 'buyVolPercent', label: 'Buy Vol %', defaultOn: true },
+      { key: 'sellVol', label: 'Sell Volume', defaultOn: true },
+      { key: 'sellVolPercent', label: 'Sell Vol %', defaultOn: true },
+      { key: 'delta', label: 'Delta', defaultOn: true },
+      { key: 'deltaPercent', label: 'Delta %', defaultOn: true },
+      { key: 'minDelta', label: 'Min Delta', defaultOn: false },
+      { key: 'maxDelta', label: 'Max Delta', defaultOn: false },
+      { key: 'poc', label: 'POC', defaultOn: false },
+      { key: 'hlRange', label: 'HL Range', defaultOn: false }
     ];
     tableRows.forEach(row => {
       const label = document.createElement('label');
       label.style.cssText = 'display:block;margin:4px 0;cursor:pointer;';
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
-      checkbox.checked = true;
+      checkbox.checked = row.defaultOn;
       checkbox.dataset.row = row.key;
       checkbox.style.marginRight = '8px';
       label.appendChild(checkbox);
@@ -472,10 +472,10 @@ export class Chart {
         sellVolPercent: true,
         delta: true,
         deltaPercent: true,
-        minDelta: true,
-        maxDelta: true,
-        poc: true,
-        hlRange: true
+        minDelta: false,
+        maxDelta: false,
+        poc: false,
+        hlRange: false
       },
       tableRowHeight: options.tableRowHeight || 16,
       footprintStyle: options.footprintStyle || 'bid_ask',

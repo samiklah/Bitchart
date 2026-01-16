@@ -29,7 +29,9 @@ export function drawPriceBar(
   ctx.textBaseline = 'middle';
   const labels = scales.computePriceBarLabels();
   for (const { price, y } of labels) {
-    ctx.fillText(scales.formatK(price), right + margin.right / 2, y);
+    // Format price with commas and 2 decimal places (e.g., 95,411.70)
+    const formattedPrice = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    ctx.fillText(formattedPrice, right + margin.right / 2, y);
   }
 }
 

@@ -68,10 +68,10 @@ export class VFC {
         sellVolPercent: true,
         delta: true,
         deltaPercent: true,
-        minDelta: true,
-        maxDelta: true,
-        poc: true,
-        hlRange: true
+        minDelta: false,
+        maxDelta: false,
+        poc: false,
+        hlRange: false
       },
       tableRowHeight: options.tableRowHeight || 16,
       footprintStyle: options.footprintStyle || 'bid_ask',
