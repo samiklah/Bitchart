@@ -12,7 +12,7 @@ import { DOMRenderer, DEFAULT_THEME } from './dom-renderer';
  * Default options for the DOM component.
  */
 const DEFAULT_OPTIONS: Required<DOMOptions> = {
-    width: 600,
+    width: 380,
     height: 400,
     rowHeight: 20,
     visibleLevels: 20,
@@ -21,13 +21,11 @@ const DEFAULT_OPTIONS: Required<DOMOptions> = {
     showHeaders: true,
     theme: DEFAULT_THEME,
     columns: {
-        bidVol: true,
-        askVol: true,
         bid: true,
-        atBid: true,
-        atAsk: true,
-        ask: true,
+        sold: true,
         price: true,
+        bought: true,
+        ask: true,
         deltaVol: true,
         volume: true,
     },
@@ -39,37 +37,12 @@ const DEFAULT_OPTIONS: Required<DOMOptions> = {
 function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOMOptions>['columns']): DOMColumn[] {
     const columns: DOMColumn[] = [];
 
-    if (columnVisibility.bidVol) {
-        columns.push({
-            id: 'bidVol',
-            label: 'Bid Vol',
-            width: 60,
-            align: 'right',
-            getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
-            getBarValue: (level, max) => level.sold / max,
-            barColor: theme.bidColor,
-            barSide: 'left',  // Bar grows from right edge toward left (inward)
-        });
-    }
-
-    if (columnVisibility.askVol) {
-        columns.push({
-            id: 'askVol',
-            label: 'Ask Vol',
-            width: 60,
-            align: 'left',
-            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
-            getBarValue: (level, max) => level.bought / max,
-            barColor: theme.askColor,
-            barSide: 'right',  // Bar grows from left edge toward right (inward)
-        });
-    }
-
+    // Bid column (left side)
     if (columnVisibility.bid) {
         columns.push({
             id: 'bid',
             label: 'Bid',
-            width: 60,
+            width: 50,
             align: 'right',
             getValue: (level) => level.bid > 0 ? formatVolume(level.bid) : '',
             getBarValue: (level, max) => level.bid / max,
@@ -78,31 +51,51 @@ function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOM
         });
     }
 
-    if (columnVisibility.atBid) {
+    // Sold volume (next to Bid)
+    if (columnVisibility.sold) {
         columns.push({
-            id: 'atBid',
-            label: '@Bid',
+            id: 'sold',
+            label: 'Sold',
             width: 50,
             align: 'right',
             getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
+            getBarValue: (level, max) => level.sold / max,
+            barColor: theme.askColor,
+            barSide: 'left',
         });
     }
 
-    if (columnVisibility.atAsk) {
+    // Price column in the middle
+    if (columnVisibility.price) {
         columns.push({
-            id: 'atAsk',
-            label: '@Ask',
-            width: 50,
-            align: 'right',
-            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+            id: 'price',
+            label: 'Price',
+            width: 70,
+            align: 'center',
+            getValue: (level) => formatPrice(level.price),
         });
     }
 
+    // Bought volume (next to Ask)
+    if (columnVisibility.bought) {
+        columns.push({
+            id: 'bought',
+            label: 'Bought',
+            width: 50,
+            align: 'left',
+            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+            getBarValue: (level, max) => level.bought / max,
+            barColor: theme.bidColor,
+            barSide: 'right',
+        });
+    }
+
+    // Ask column (right side)
     if (columnVisibility.ask) {
         columns.push({
             id: 'ask',
             label: 'Ask',
-            width: 60,
+            width: 50,
             align: 'left',
             getValue: (level) => level.ask > 0 ? formatVolume(level.ask) : '',
             getBarValue: (level, max) => level.ask / max,
@@ -111,21 +104,11 @@ function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOM
         });
     }
 
-    if (columnVisibility.price) {
-        columns.push({
-            id: 'price',
-            label: 'Price',
-            width: 80,
-            align: 'center',
-            getValue: (level) => formatPrice(level.price),
-        });
-    }
-
     if (columnVisibility.deltaVol) {
         columns.push({
             id: 'deltaVol',
             label: 'Delta',
-            width: 60,
+            width: 55,
             align: 'right',
             getValue: (level) => {
                 if (level.delta === 0) return '';
@@ -142,7 +125,7 @@ function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOM
         columns.push({
             id: 'volume',
             label: 'Volume',
-            width: 70,
+            width: 55,
             align: 'right',
             getValue: (level) => level.volume > 0 ? formatVolume(level.volume) : '',
             getBarValue: (level, max) => level.volume / max,
@@ -158,13 +141,11 @@ function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOM
  * Format volume numbers for display.
  */
 function formatVolume(value: number): string {
-    if (Math.abs(value) >= 1000000) {
-        return (value / 1000000).toFixed(1) + 'M';
+    // Always show decimal format
+    if (value >= 1000) {
+        return value.toFixed(2);
     }
-    if (Math.abs(value) >= 1000) {
-        return (value / 1000).toFixed(1) + 'K';
-    }
-    return value.toFixed(value < 10 ? 2 : 0);
+    return value.toFixed(2);
 }
 
 /**
@@ -236,64 +217,9 @@ export class DOM {
      * Bind mouse/touch events for scrolling.
      */
     private bindEvents(): void {
-        // Mouse wheel scrolling
-        this.canvas.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
-
-        // Mouse drag scrolling
-        this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
-
-        // Touch scrolling
-        this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
-        this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
-        this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
+        // Scrolling disabled - mid-price always stays centered
     }
 
-    private handleWheel(e: WheelEvent): void {
-        e.preventDefault();
-        const delta = Math.sign(e.deltaY);
-        this.scrollOffset += delta;
-        this.render();
-    }
-
-    private handleMouseDown(e: MouseEvent): void {
-        this.isDragging = true;
-        this.lastY = e.clientY;
-    }
-
-    private handleMouseMove(e: MouseEvent): void {
-        if (!this.isDragging) return;
-        const deltaY = this.lastY - e.clientY;
-        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
-        this.lastY = e.clientY;
-        this.render();
-    }
-
-    private handleMouseUp(): void {
-        this.isDragging = false;
-    }
-
-    private handleTouchStart(e: TouchEvent): void {
-        if (e.touches.length === 1) {
-            this.isDragging = true;
-            this.lastY = e.touches[0].clientY;
-        }
-    }
-
-    private handleTouchMove(e: TouchEvent): void {
-        if (!this.isDragging || e.touches.length !== 1) return;
-        e.preventDefault();
-        const deltaY = this.lastY - e.touches[0].clientY;
-        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
-        this.lastY = e.touches[0].clientY;
-        this.render();
-    }
-
-    private handleTouchEnd(): void {
-        this.isDragging = false;
-    }
 
     /**
      * Render the DOM.
@@ -380,13 +306,6 @@ export class DOM {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
-
-        // Remove event listeners
-        this.canvas.removeEventListener('wheel', this.handleWheel.bind(this));
-        this.canvas.removeEventListener('mousedown', this.handleMouseDown.bind(this));
-        this.canvas.removeEventListener('mousemove', this.handleMouseMove.bind(this));
-        this.canvas.removeEventListener('mouseup', this.handleMouseUp.bind(this));
-        this.canvas.removeEventListener('mouseleave', this.handleMouseUp.bind(this));
 
         // Remove canvas from container
         if (this.canvas.parentNode) {

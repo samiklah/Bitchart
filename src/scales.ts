@@ -305,10 +305,9 @@ export class Scales {
   }
 
   screenYToPrice(screenY: number): number {
-    // Use the exact same calculation as the crosshair
-    return this.rowIndexToPrice(
-      (screenY - this.margin.top) / this.rowHeightPx() + this.view.offsetRows
-    );
+    // Calculate raw row from screen position (without offsetRows - that's handled in rowIndexToPrice)
+    const rawRow = (screenY - this.margin.top) / this.rowHeightPx();
+    return this.rowIndexToPrice(rawRow);
   }
 
   private get ladderTop(): number {

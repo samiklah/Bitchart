@@ -25,13 +25,6 @@ export declare class DOM {
      * Bind mouse/touch events for scrolling.
      */
     private bindEvents;
-    private handleWheel;
-    private handleMouseDown;
-    private handleMouseMove;
-    private handleMouseUp;
-    private handleTouchStart;
-    private handleTouchMove;
-    private handleTouchEnd;
     /**
      * Render the DOM.
      */

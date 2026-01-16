@@ -326,8 +326,9 @@ class Scales {
         return vr.startIndex + relativeX / s;
     }
     screenYToPrice(screenY) {
-        // Use the exact same calculation as the crosshair
-        return this.rowIndexToPrice((screenY - this.margin.top) / this.rowHeightPx() + this.view.offsetRows);
+        // Calculate raw row from screen position (without offsetRows - that's handled in rowIndexToPrice)
+        const rawRow = (screenY - this.margin.top) / this.rowHeightPx();
+        return this.rowIndexToPrice(rawRow);
     }
     get ladderTop() {
         if (this.ladderTopDirty) {
@@ -3657,6 +3658,7 @@ const DEFAULT_THEME = {
     deltaPositive: '#26a69a',
     deltaNegative: '#ef5350',
     midPriceColor: '#4caf50',
+    midPriceBackground: '#b8860b', // Dark golden/yellow for mid-price row
     atBidColor: '#2196f3',
     atAskColor: '#ef5350',
     gridColor: '#333333',
@@ -3702,26 +3704,35 @@ class DOMRenderer {
         const visibleRows = Math.floor(contentHeight / rowHeight);
         // Find mid-price index to center the view
         const midPriceIndex = this.findMidPriceIndex(data.levels, data.midPrice);
-        // Calculate start index based on scroll offset and centering on mid-price
+        // Calculate start index - center on mid-price (no bounds clamping - handled in render loop)
         let startIndex = midPriceIndex - Math.floor(visibleRows / 2) + scrollOffset;
-        startIndex = Math.max(0, Math.min(startIndex, data.levels.length - visibleRows));
-        // Calculate max values for bar scaling
-        const maxBid = Math.max(...data.levels.map(l => l.bid), 1);
-        const maxAsk = Math.max(...data.levels.map(l => l.ask), 1);
-        const maxSold = Math.max(...data.levels.map(l => l.sold), 1);
-        const maxBought = Math.max(...data.levels.map(l => l.bought), 1);
-        const maxDelta = Math.max(...data.levels.map(l => Math.abs(l.delta)), 1);
-        const maxVolume = Math.max(...data.levels.map(l => l.volume), 1);
-        const maxValues = { maxBid, maxAsk, maxSold, maxBought, maxDelta, maxVolume };
+        // Calculate max values for bar scaling based on VISIBLE levels only (±20 ticks around mid-price)
+        const visibleLevels = data.levels.filter((_, idx) => {
+            return idx >= startIndex && idx < startIndex + visibleRows;
+        });
+        const maxBid = Math.max(...visibleLevels.map(l => l.bid), 1);
+        const maxAsk = Math.max(...visibleLevels.map(l => l.ask), 1);
+        const maxBidandAsk = Math.max(maxBid, maxAsk);
+        const maxSold = Math.max(...visibleLevels.map(l => l.sold), 1);
+        const maxBought = Math.max(...visibleLevels.map(l => l.bought), 1);
+        const maxBidandAskandSoldandBought = Math.max(maxBidandAsk, maxSold, maxBought);
+        const maxDelta = Math.max(...visibleLevels.map(l => Math.abs(l.delta)), 1);
+        const maxVolume = Math.max(...visibleLevels.map(l => l.volume), 1);
+        const maxValues = { maxBidandAskandSoldandBought, maxBidandAsk, maxDelta, maxVolume };
         // Render headers
         if (showHeaders) {
             this.renderHeaders(columns, rowHeight, fontSize, fontFamily);
         }
         // Render rows
-        for (let i = 0; i < visibleRows && (startIndex + i) < data.levels.length; i++) {
-            const level = data.levels[startIndex + i];
+        for (let i = 0; i < visibleRows; i++) {
+            const levelIndex = startIndex + i;
+            // Skip if level index is out of bounds
+            if (levelIndex < 0 || levelIndex >= data.levels.length)
+                continue;
+            const level = data.levels[levelIndex];
             const y = headerHeight + i * rowHeight;
-            const isMidPrice = Math.abs(level.price - data.midPrice) < 0.01;
+            // Use index comparison for more reliable mid-price detection
+            const isMidPrice = levelIndex === midPriceIndex;
             this.renderRow(level, y, rowHeight, columns, maxValues, fontSize, fontFamily, i % 2 === 0, isMidPrice);
         }
         // Render grid lines
@@ -3798,11 +3809,6 @@ class DOMRenderer {
             }
             ctx.fillStyle = bgColor;
             ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
-            // Mid-price highlight
-            if (isMidPrice) {
-                ctx.fillStyle = theme.midPriceColor + '30';
-                ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
-            }
             // Render bar if applicable
             if (col.getBarValue && col.barColor) {
                 const maxValue = this.getMaxValueForColumn(col.id, maxValues);
@@ -3835,22 +3841,31 @@ class DOMRenderer {
             }
             x += col.width;
         }
+        // Draw yellow line at bottom of mid-price row
+        if (isMidPrice) {
+            let totalWidth = 0;
+            columns.forEach(col => totalWidth += col.width);
+            ctx.strokeStyle = theme.midPriceBackground;
+            ctx.lineWidth = 2 * this.dpr;
+            ctx.beginPath();
+            ctx.moveTo(0, (y + rowHeight) * this.dpr);
+            ctx.lineTo(totalWidth * this.dpr, (y + rowHeight) * this.dpr);
+            ctx.stroke();
+        }
     }
     /**
      * Get max value for a column for bar scaling.
      */
     getMaxValueForColumn(colId, maxValues) {
         switch (colId) {
-            case 'bidVol':
-                return maxValues.maxSold;
-            case 'askVol':
-                return maxValues.maxBought;
+            case 'sold':
+                return maxValues.maxBidandAskandSoldandBought;
+            case 'bought':
+                return maxValues.maxBidandAskandSoldandBought;
             case 'bid':
-            case 'atBid':
-                return maxValues.maxBid;
+                return maxValues.maxBidandAsk;
             case 'ask':
-            case 'atAsk':
-                return maxValues.maxAsk;
+                return maxValues.maxBidandAsk;
             case 'deltaVol':
                 return maxValues.maxDelta;
             case 'volume':
@@ -3864,19 +3879,17 @@ class DOMRenderer {
      */
     getTextColor(colId, level, theme) {
         switch (colId) {
-            case 'atBid':
-                return theme.atBidColor; // Cyan for @Bid market orders
-            case 'atAsk':
-                return theme.atAskColor; // Red for @Ask market orders
-            case 'bidVol':
-            case 'askVol':
+            case 'sold':
+                return theme.textColor; // Red for Sold volume
+            case 'bought':
+                return theme.textColor; // Green for Bought volume
             case 'bid':
             case 'ask':
             case 'deltaVol':
             case 'volume':
             case 'price':
             default:
-                return theme.textColor; // White for all other columns
+                return theme.textColor; // Default text color for other columns
         }
     }
     /**
@@ -3930,7 +3943,7 @@ class DOMRenderer {
  * Default options for the DOM component.
  */
 const DEFAULT_OPTIONS = {
-    width: 600,
+    width: 380,
     height: 400,
     rowHeight: 20,
     visibleLevels: 20,
@@ -3939,13 +3952,11 @@ const DEFAULT_OPTIONS = {
     showHeaders: true,
     theme: DEFAULT_THEME,
     columns: {
-        bidVol: true,
-        askVol: true,
         bid: true,
-        atBid: true,
-        atAsk: true,
-        ask: true,
+        sold: true,
         price: true,
+        bought: true,
+        ask: true,
         deltaVol: true,
         volume: true,
     },
@@ -3955,35 +3966,12 @@ const DEFAULT_OPTIONS = {
  */
 function createColumns(theme, columnVisibility) {
     const columns = [];
-    if (columnVisibility.bidVol) {
-        columns.push({
-            id: 'bidVol',
-            label: 'Bid Vol',
-            width: 60,
-            align: 'right',
-            getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
-            getBarValue: (level, max) => level.sold / max,
-            barColor: theme.bidColor,
-            barSide: 'left', // Bar grows from right edge toward left (inward)
-        });
-    }
-    if (columnVisibility.askVol) {
-        columns.push({
-            id: 'askVol',
-            label: 'Ask Vol',
-            width: 60,
-            align: 'left',
-            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
-            getBarValue: (level, max) => level.bought / max,
-            barColor: theme.askColor,
-            barSide: 'right', // Bar grows from left edge toward right (inward)
-        });
-    }
+    // Bid column (left side)
     if (columnVisibility.bid) {
         columns.push({
             id: 'bid',
             label: 'Bid',
-            width: 60,
+            width: 50,
             align: 'right',
             getValue: (level) => level.bid > 0 ? formatVolume(level.bid) : '',
             getBarValue: (level, max) => level.bid / max,
@@ -3991,29 +3979,48 @@ function createColumns(theme, columnVisibility) {
             barSide: 'left',
         });
     }
-    if (columnVisibility.atBid) {
+    // Sold volume (next to Bid)
+    if (columnVisibility.sold) {
         columns.push({
-            id: 'atBid',
-            label: '@Bid',
+            id: 'sold',
+            label: 'Sold',
             width: 50,
             align: 'right',
             getValue: (level) => level.sold > 0 ? formatVolume(level.sold) : '',
+            getBarValue: (level, max) => level.sold / max,
+            barColor: theme.askColor,
+            barSide: 'left',
         });
     }
-    if (columnVisibility.atAsk) {
+    // Price column in the middle
+    if (columnVisibility.price) {
         columns.push({
-            id: 'atAsk',
-            label: '@Ask',
-            width: 50,
-            align: 'right',
-            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+            id: 'price',
+            label: 'Price',
+            width: 70,
+            align: 'center',
+            getValue: (level) => formatPrice(level.price),
         });
     }
+    // Bought volume (next to Ask)
+    if (columnVisibility.bought) {
+        columns.push({
+            id: 'bought',
+            label: 'Bought',
+            width: 50,
+            align: 'left',
+            getValue: (level) => level.bought > 0 ? formatVolume(level.bought) : '',
+            getBarValue: (level, max) => level.bought / max,
+            barColor: theme.bidColor,
+            barSide: 'right',
+        });
+    }
+    // Ask column (right side)
     if (columnVisibility.ask) {
         columns.push({
             id: 'ask',
             label: 'Ask',
-            width: 60,
+            width: 50,
             align: 'left',
             getValue: (level) => level.ask > 0 ? formatVolume(level.ask) : '',
             getBarValue: (level, max) => level.ask / max,
@@ -4021,20 +4028,11 @@ function createColumns(theme, columnVisibility) {
             barSide: 'right',
         });
     }
-    if (columnVisibility.price) {
-        columns.push({
-            id: 'price',
-            label: 'Price',
-            width: 80,
-            align: 'center',
-            getValue: (level) => formatPrice(level.price),
-        });
-    }
     if (columnVisibility.deltaVol) {
         columns.push({
             id: 'deltaVol',
             label: 'Delta',
-            width: 60,
+            width: 55,
             align: 'right',
             getValue: (level) => {
                 if (level.delta === 0)
@@ -4051,7 +4049,7 @@ function createColumns(theme, columnVisibility) {
         columns.push({
             id: 'volume',
             label: 'Volume',
-            width: 70,
+            width: 55,
             align: 'right',
             getValue: (level) => level.volume > 0 ? formatVolume(level.volume) : '',
             getBarValue: (level, max) => level.volume / max,
@@ -4065,13 +4063,11 @@ function createColumns(theme, columnVisibility) {
  * Format volume numbers for display.
  */
 function formatVolume(value) {
-    if (Math.abs(value) >= 1000000) {
-        return (value / 1000000).toFixed(1) + 'M';
+    // Always show decimal format
+    if (value >= 1000) {
+        return value.toFixed(2);
     }
-    if (Math.abs(value) >= 1000) {
-        return (value / 1000).toFixed(1) + 'K';
-    }
-    return value.toFixed(value < 10 ? 2 : 0);
+    return value.toFixed(2);
 }
 /**
  * Format price for display.
@@ -4127,56 +4123,7 @@ class DOM {
      * Bind mouse/touch events for scrolling.
      */
     bindEvents() {
-        // Mouse wheel scrolling
-        this.canvas.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
-        // Mouse drag scrolling
-        this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
-        // Touch scrolling
-        this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
-        this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
-        this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
-    }
-    handleWheel(e) {
-        e.preventDefault();
-        const delta = Math.sign(e.deltaY);
-        this.scrollOffset += delta;
-        this.render();
-    }
-    handleMouseDown(e) {
-        this.isDragging = true;
-        this.lastY = e.clientY;
-    }
-    handleMouseMove(e) {
-        if (!this.isDragging)
-            return;
-        const deltaY = this.lastY - e.clientY;
-        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
-        this.lastY = e.clientY;
-        this.render();
-    }
-    handleMouseUp() {
-        this.isDragging = false;
-    }
-    handleTouchStart(e) {
-        if (e.touches.length === 1) {
-            this.isDragging = true;
-            this.lastY = e.touches[0].clientY;
-        }
-    }
-    handleTouchMove(e) {
-        if (!this.isDragging || e.touches.length !== 1)
-            return;
-        e.preventDefault();
-        const deltaY = this.lastY - e.touches[0].clientY;
-        this.scrollOffset += Math.round(deltaY / this.options.rowHeight);
-        this.lastY = e.touches[0].clientY;
-        this.render();
-    }
-    handleTouchEnd() {
-        this.isDragging = false;
+        // Scrolling disabled - mid-price always stays centered
     }
     /**
      * Render the DOM.
@@ -4252,12 +4199,6 @@ class DOM {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
-        // Remove event listeners
-        this.canvas.removeEventListener('wheel', this.handleWheel.bind(this));
-        this.canvas.removeEventListener('mousedown', this.handleMouseDown.bind(this));
-        this.canvas.removeEventListener('mousemove', this.handleMouseMove.bind(this));
-        this.canvas.removeEventListener('mouseup', this.handleMouseUp.bind(this));
-        this.canvas.removeEventListener('mouseleave', this.handleMouseUp.bind(this));
         // Remove canvas from container
         if (this.canvas.parentNode) {
             this.canvas.parentNode.removeChild(this.canvas);

@@ -20,6 +20,7 @@ export const DEFAULT_THEME: Required<DOMTheme> = {
     deltaPositive: '#26a69a',
     deltaNegative: '#ef5350',
     midPriceColor: '#4caf50',
+    midPriceBackground: '#b8860b',  // Dark golden/yellow for mid-price row
     atBidColor: '#2196f3',
     atAskColor: '#ef5350',
     gridColor: '#333333',
@@ -83,18 +84,22 @@ export class DOMRenderer {
         // Find mid-price index to center the view
         const midPriceIndex = this.findMidPriceIndex(data.levels, data.midPrice);
 
-        // Calculate start index based on scroll offset and centering on mid-price
+        // Calculate start index - center on mid-price (no bounds clamping - handled in render loop)
         let startIndex = midPriceIndex - Math.floor(visibleRows / 2) + scrollOffset;
-        startIndex = Math.max(0, Math.min(startIndex, data.levels.length - visibleRows));
 
-        // Calculate max values for bar scaling
-        const maxBid = Math.max(...data.levels.map(l => l.bid), 1);
-        const maxAsk = Math.max(...data.levels.map(l => l.ask), 1);
-        const maxSold = Math.max(...data.levels.map(l => l.sold), 1);
-        const maxBought = Math.max(...data.levels.map(l => l.bought), 1);
-        const maxDelta = Math.max(...data.levels.map(l => Math.abs(l.delta)), 1);
-        const maxVolume = Math.max(...data.levels.map(l => l.volume), 1);
-        const maxValues = { maxBid, maxAsk, maxSold, maxBought, maxDelta, maxVolume };
+        // Calculate max values for bar scaling based on VISIBLE levels only (±20 ticks around mid-price)
+        const visibleLevels = data.levels.filter((_, idx) => {
+            return idx >= startIndex && idx < startIndex + visibleRows;
+        });
+        const maxBid = Math.max(...visibleLevels.map(l => l.bid), 1);
+        const maxAsk = Math.max(...visibleLevels.map(l => l.ask), 1);
+        const maxBidandAsk = Math.max(maxBid, maxAsk);
+        const maxSold = Math.max(...visibleLevels.map(l => l.sold), 1);
+        const maxBought = Math.max(...visibleLevels.map(l => l.bought), 1);
+        const maxBidandAskandSoldandBought = Math.max(maxBidandAsk, maxSold, maxBought);
+        const maxDelta = Math.max(...visibleLevels.map(l => Math.abs(l.delta)), 1);
+        const maxVolume = Math.max(...visibleLevels.map(l => l.volume), 1);
+        const maxValues = { maxBidandAskandSoldandBought, maxBidandAsk, maxDelta, maxVolume };
 
         // Render headers
         if (showHeaders) {
@@ -102,10 +107,15 @@ export class DOMRenderer {
         }
 
         // Render rows
-        for (let i = 0; i < visibleRows && (startIndex + i) < data.levels.length; i++) {
-            const level = data.levels[startIndex + i];
+        for (let i = 0; i < visibleRows; i++) {
+            const levelIndex = startIndex + i;
+            // Skip if level index is out of bounds
+            if (levelIndex < 0 || levelIndex >= data.levels.length) continue;
+
+            const level = data.levels[levelIndex];
             const y = headerHeight + i * rowHeight;
-            const isMidPrice = Math.abs(level.price - data.midPrice) < 0.01;
+            // Use index comparison for more reliable mid-price detection
+            const isMidPrice = levelIndex === midPriceIndex;
 
             this.renderRow(
                 level,
@@ -207,7 +217,7 @@ export class DOMRenderer {
         y: number,
         rowHeight: number,
         columns: DOMColumn[],
-        maxValues: { maxBid: number; maxAsk: number; maxSold: number; maxBought: number; maxDelta: number; maxVolume: number },
+        maxValues: { maxBidandAskandSoldandBought: number; maxBidandAsk: number; maxDelta: number; maxVolume: number },
         fontSize: number,
         fontFamily: string,
         isEven: boolean,
@@ -226,12 +236,6 @@ export class DOMRenderer {
 
             ctx.fillStyle = bgColor;
             ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
-
-            // Mid-price highlight
-            if (isMidPrice) {
-                ctx.fillStyle = theme.midPriceColor + '30';
-                ctx.fillRect(x * this.dpr, y * this.dpr, col.width * this.dpr, rowHeight * this.dpr);
-            }
 
             // Render bar if applicable
             if (col.getBarValue && col.barColor) {
@@ -278,6 +282,18 @@ export class DOMRenderer {
 
             x += col.width;
         }
+
+        // Draw yellow line at bottom of mid-price row
+        if (isMidPrice) {
+            let totalWidth = 0;
+            columns.forEach(col => totalWidth += col.width);
+            ctx.strokeStyle = theme.midPriceBackground;
+            ctx.lineWidth = 2 * this.dpr;
+            ctx.beginPath();
+            ctx.moveTo(0, (y + rowHeight) * this.dpr);
+            ctx.lineTo(totalWidth * this.dpr, (y + rowHeight) * this.dpr);
+            ctx.stroke();
+        }
     }
 
     /**
@@ -285,19 +301,17 @@ export class DOMRenderer {
      */
     private getMaxValueForColumn(
         colId: string,
-        maxValues: { maxBid: number; maxAsk: number; maxSold: number; maxBought: number; maxDelta: number; maxVolume: number }
+        maxValues: { maxBidandAskandSoldandBought: number; maxBidandAsk: number; maxDelta: number; maxVolume: number }
     ): number {
         switch (colId) {
-            case 'bidVol':
-                return maxValues.maxSold;
-            case 'askVol':
-                return maxValues.maxBought;
+            case 'sold':
+                return maxValues.maxBidandAskandSoldandBought;
+            case 'bought':
+                return maxValues.maxBidandAskandSoldandBought;
             case 'bid':
-            case 'atBid':
-                return maxValues.maxBid;
+                return maxValues.maxBidandAsk;
             case 'ask':
-            case 'atAsk':
-                return maxValues.maxAsk;
+                return maxValues.maxBidandAsk;
             case 'deltaVol':
                 return maxValues.maxDelta;
             case 'volume':
@@ -312,19 +326,17 @@ export class DOMRenderer {
      */
     private getTextColor(colId: string, level: DOMLevel, theme: Required<DOMTheme>): string {
         switch (colId) {
-            case 'atBid':
-                return theme.atBidColor;  // Cyan for @Bid market orders
-            case 'atAsk':
-                return theme.atAskColor;  // Red for @Ask market orders
-            case 'bidVol':
-            case 'askVol':
+            case 'sold':
+                return theme.textColor;    // Red for Sold volume
+            case 'bought':
+                return theme.textColor;    // Green for Bought volume
             case 'bid':
             case 'ask':
             case 'deltaVol':
             case 'volume':
             case 'price':
             default:
-                return theme.textColor;  // White for all other columns
+                return theme.textColor;  // Default text color for other columns
         }
     }
 

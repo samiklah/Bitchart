@@ -20,6 +20,10 @@ export interface DOMLevel {
     delta: number;
     /** Total volume traded at this price */
     volume: number;
+    /** Number of sell trades at this price (@Bid) */
+    soldCount?: number;
+    /** Number of buy trades at this price (@Ask) */
+    boughtCount?: number;
 }
 
 /**
@@ -70,6 +74,8 @@ export interface DOMTheme {
     deltaNegative?: string;
     /** Mid-price highlight color */
     midPriceColor?: string;
+    /** Mid-price row background color */
+    midPriceBackground?: string;
     /** @Bid market order highlight color */
     atBidColor?: string;
     /** @Ask market order highlight color */
@@ -102,13 +108,11 @@ export interface DOMOptions {
     theme?: DOMTheme;
     /** Column visibility */
     columns?: {
-        bidVol?: boolean;
-        askVol?: boolean;
+        sold?: boolean;
         bid?: boolean;
-        atBid?: boolean;
-        atAsk?: boolean;
-        ask?: boolean;
         price?: boolean;
+        ask?: boolean;
+        bought?: boolean;
         deltaVol?: boolean;
         volume?: boolean;
     };
