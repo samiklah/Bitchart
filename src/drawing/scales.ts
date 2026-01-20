@@ -28,9 +28,13 @@ export function drawPriceBar(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const labels = scales.computePriceBarLabels();
+  const precision = scales.getPricePrecision();
   for (const { price, y } of labels) {
-    // Format price with commas and 2 decimal places (e.g., 95,411.70)
-    const formattedPrice = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Format price with commas and dynamic decimal places based on tick size
+    const formattedPrice = price.toLocaleString('en-US', {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision
+    });
     ctx.fillText(formattedPrice, right + margin.right / 2, y);
   }
 }

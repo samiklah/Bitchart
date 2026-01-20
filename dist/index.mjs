@@ -242,7 +242,11 @@ class Scales {
             this.scaledBox() >= this.TEXT_VIS.minBoxPx);
     }
     priceToRowIndex(price) {
-        return (this.ladderTop - price) / this.TICK + this.view.offsetRows;
+        // Round the grid portion to nearest integer to eliminate floating-point drift.
+        // This ensures prices quantized at TICK intervals map to consecutive integer rows.
+        // The scroll offset (offsetRows) is added as-is to preserve smooth scrolling.
+        const gridRow = Math.round((this.ladderTop - price) / this.TICK);
+        return gridRow + this.view.offsetRows;
     }
     rowIndexToPrice(row) {
         return this.ladderTop - (row - this.view.offsetRows) * this.TICK;
@@ -295,12 +299,27 @@ class Scales {
         let start = Math.ceil(pMin / stepPrice) * stepPrice;
         const out = [];
         for (let price = start; price <= pMax + 1e-6; price += stepPrice) {
-            out.push({ price: Math.round(price), y: this.priceToY(price) });
+            // Calculate decimal precision based on tick size
+            // For tick size 0.01 -> precision 2, for 0.001 -> precision 3, etc.
+            const precision = this.TICK < 1 ? Math.ceil(-Math.log10(this.TICK)) : 0;
+            const roundingFactor = Math.pow(10, precision);
+            // Round to appropriate precision based on tick size
+            const roundedPrice = Math.round(price * roundingFactor) / roundingFactor;
+            out.push({ price: roundedPrice, y: this.priceToY(price) });
         }
         return out;
     }
     formatK(v) {
         return formatNumber(v);
+    }
+    /**
+     * Returns the number of decimal places to use for price formatting based on TICK size.
+     * E.g., TICK=0.01 -> 2, TICK=0.0001 -> 4, TICK=10 -> 0
+     */
+    getPricePrecision() {
+        if (this.TICK >= 1)
+            return 0;
+        return Math.max(0, Math.ceil(-Math.log10(this.TICK)));
     }
     get xShift() {
         const s = this.scaledSpacing();
@@ -724,10 +743,13 @@ function drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, sca
     let totBuy = 0, totSell = 0;
     for (let r = 0; r < rows.length; r++) {
         const f = rows[r];
+        // Snap to nearest integer row index to prevent sub-pixel gaps
         const row = scales.priceToRowIndex(f.price);
         const yTop = scales.rowToY(row - 0.5);
         const yBot = scales.rowToY(row + 0.5);
-        const h = Math.max(1, yBot - yTop);
+        // Ensure height is at least 1px and perfectly fills the gap
+        // Use slightly larger height (ceil) or exact calculation to overlap safely
+        const h = scales.rowToY(row + 0.5) - scales.rowToY(row - 0.5);
         minRow = Math.min(minRow, row - 0.5);
         maxRow = Math.max(maxRow, row + 0.5);
         totBuy += f.buy;
@@ -736,11 +758,12 @@ function drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, sca
         // Only draw if the row is visible (within chart bounds)
         const margin = scales.getMargin();
         const chartBottom = margin.top + scales.chartHeight();
+        // Draw with slight overlap to prevent cracks
         if (yTop >= margin.top && yBot <= chartBottom) {
             ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
-            ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
+            ctx.fillRect(leftX, yTop - 0.5, scales.scaledBox(), h + 1); // Add 1px overlap
             ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
-            ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+            ctx.fillRect(rightX, yTop - 0.5, scales.scaledBox(), h + 1); // Add 1px overlap
         }
     }
     return { minRow, maxRow, totBuy, totSell };
@@ -749,7 +772,7 @@ function drawFootprintBoxes(ctx, rows, pocIdx, enableProfile, leftX, rightX, sca
  * Draws the footprint with delta bars (Delta Volume mode).
  */
 function drawDeltaFootprintBoxes(ctx, rows, leftX, rightX, scales, theme, zoomX) {
-    const maxTotalVol = Math.max(...rows.map(f => f.buy + f.sell), 1);
+    Math.max(...rows.map(f => f.buy + f.sell), 1);
     // Calculate max abs delta for color intensity
     const maxAbsDelta = Math.max(...rows.map(f => Math.abs(f.buy - f.sell)), 1);
     // Available width for the bar (right side of candle)
@@ -758,15 +781,16 @@ function drawDeltaFootprintBoxes(ctx, rows, leftX, rightX, scales, theme, zoomX)
     let totBuy = 0, totSell = 0;
     for (let r = 0; r < rows.length; r++) {
         const f = rows[r];
+        // Snap to nearest integer row index
         const row = scales.priceToRowIndex(f.price);
         const yTop = scales.rowToY(row - 0.5);
         const yBot = scales.rowToY(row + 0.5);
-        const h = Math.max(1, yBot - yTop);
+        const h = scales.rowToY(row + 0.5) - scales.rowToY(row - 0.5);
         minRow = Math.min(minRow, row - 0.5);
         maxRow = Math.max(maxRow, row + 0.5);
         totBuy += f.buy;
         totSell += f.sell;
-        const total = f.buy + f.sell;
+        f.buy + f.sell;
         const delta = f.buy - f.sell;
         // Only draw if visible
         const margin = scales.getMargin();
@@ -775,41 +799,19 @@ function drawDeltaFootprintBoxes(ctx, rows, leftX, rightX, scales, theme, zoomX)
             // Calculate bar width based on Total Volume relative to max in this candle
             // Available width is effectively the whole slot minus margin/wick
             // But scaledBox() returns the width of ONE SIDE (approx 55px).
-            // We want to use the full available width on the right of the wick.
-            // Wick is at leftX + scaledCandle()/2.
-            // Space extends to leftX + scaledCandle()/2 + scaledBox().
-            const barWidth = (total / maxTotalVol) * barMaxWidth;
-            // Color based on Delta
-            const isPos = delta >= 0;
-            const color = isPos ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
-            // Opacity based on Delta magnitude relative to max delta
-            // Base opacity 0.3, max 1.0
-            const opacity = 0.3 + 0.7 * (Math.abs(delta) / maxAbsDelta);
-            ctx.fillStyle = color;
-            ctx.globalAlpha = opacity;
-            // Draw main bar on the right side
-            // rightX is the right edge of the candle body
-            ctx.fillRect(rightX, yTop, barWidth, h);
-            ctx.globalAlpha = 1.0; // Reset alpha
-            // Draw Delta Value Text
-            if (scales.shouldShowCellText()) {
-                const fontSize = Math.max(8, Math.min(16, 11 * zoomX));
-                ctx.font = `${fontSize}px system-ui`;
+            // For delta footprint, we use space from center line to right.
+            const width = (Math.abs(delta) / maxAbsDelta) * barMaxWidth;
+            // Draw bar extending from center (leftX) towards right
+            ctx.fillStyle = delta >= 0 ?
+                (theme.upColor || '#22c55e') :
+                (theme.downColor || '#ef4444');
+            ctx.fillRect(leftX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
+            // Optional: Draw text overlay if height is sufficient
+            if (scales.rowHeightPx() > 10) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px sans-serif';
                 ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = theme.textColorBright || '#ddd';
-                // Draw text slightly inside or outside depending on width? 
-                // Request said: "show only the delta on the right side of each candle, with bars"
-                // Let's put text just to the right of the bar start, or centered in bar if wide enough?
-                // Standard approach: Text overlaying the bar
-                if (barWidth > 20) {
-                    ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
-                }
-                else {
-                    // If bar is too small, maybe draw outside? Or just draw anyway?
-                    // Let's draw it anyway, usually fine.
-                    ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
-                }
+                ctx.fillText(delta.toString(), leftX + width + 2, scales.rowToY(row));
             }
         }
     }
@@ -1108,9 +1110,10 @@ function drawCrosshair(ctx, width, height, margin, crosshair, scales, data, them
     let labelColor = theme.scaleBackground || '#111';
     let textColor = theme.textColor || '#aaa';
     if (inMainChart) {
-        // Show price with commas and 2 decimal places
+        // Show price with commas and dynamic decimal places based on tick size
         const price = scales.rowIndexToPrice((crosshair.y - margin.top) / scales.rowHeightPx());
-        labelText = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const precision = scales.getPricePrecision();
+        labelText = price.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
     }
     else if (inOI && indicatorData && indicatorData.oiData.length > 0) {
         // Show OI value - calculate based on Y position in OI pane
@@ -1209,7 +1212,8 @@ function drawCurrentPriceLabel(ctx, width, lastPrice, margin, scales, theme) {
     }
     // Draw price label on the price bar (right side scale area)
     // Always show the label, but clamp it to the chart area bounds
-    const labelText = lastPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const precision = scales.getPricePrecision();
+    const labelText = lastPrice.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
     ctx.font = 'bold 12px system-ui';
     const textWidth = ctx.measureText(labelText).width;
     const boxWidth = textWidth + 8;
@@ -2121,8 +2125,13 @@ class Drawing {
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
         const labels = this.scales.computePriceBarLabels();
+        const precision = this.scales.getPricePrecision();
         for (const { price, y } of labels) {
-            this.ctx.fillText(this.scales.formatK(price), right + this.margin.right / 2, y);
+            const formattedPrice = price.toLocaleString('en-US', {
+                minimumFractionDigits: precision,
+                maximumFractionDigits: precision
+            });
+            this.ctx.fillText(formattedPrice, right + this.margin.right / 2, y);
         }
         // Draw timeline at bottom
         const chartW = width - this.margin.left - this.margin.right;
@@ -2367,22 +2376,37 @@ class Chart {
                 }
             }
         }
-        // Find the most common smallest difference
+        // Find the most frequent difference (Mode) to avoid selecting noise (e.g. 1e-8)
         if (priceDifferences.size === 0)
             return 10;
-        const sortedDiffs = Array.from(priceDifferences).sort((a, b) => a - b);
-        const smallestDiff = sortedDiffs[0];
-        // For crypto data, ensure tick size is reasonable (at least 0.1 for most pairs)
-        // If detected tick is too small, round up to a reasonable value
-        if (smallestDiff < 0.1) {
-            // Round to nearest 0.1, 0.5, or 1.0
-            if (smallestDiff < 0.25)
-                return 0.1;
-            if (smallestDiff < 0.75)
-                return 0.5;
-            return 1.0;
+        const diffCounts = new Map();
+        for (const d of priceDifferences) {
+            // Group similar diffs to handle slight float variance
+            let found = false;
+            for (const [existing, count] of diffCounts) {
+                if (Math.abs(existing - d) < 1e-9) {
+                    diffCounts.set(existing, count + 1);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                diffCounts.set(d, 1);
+            }
         }
-        return smallestDiff; // Return the smallest detected tick size
+        let bestDiff = 1;
+        let maxCount = 0;
+        // Sort by count descending, then by value (prefer smaller common tick for precision)
+        for (const [diff, count] of diffCounts) {
+            if (count > maxCount) {
+                maxCount = count;
+                bestDiff = diff;
+            }
+            else if (count === maxCount && diff < bestDiff) {
+                bestDiff = diff;
+            }
+        }
+        return bestDiff;
     }
     createChartStructure(container) {
         // Check if toolbars already exist
@@ -2867,9 +2891,14 @@ class Chart {
                     this.view.offsetX = startIndex * s;
                     // Center the last candle's close price vertically at canvas center
                     const lastPrice = this.lastPrice;
-                    const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
-                    const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
-                    this.view.offsetRows = centerRow - priceRow;
+                    const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+                    const currentPriceRow = this.scales.priceToRowIndex(lastPrice);
+                    // Calculate the new offset required to place the price at centerRow
+                    // priceToRowIndex returns: (ladderTop - price) / TICK + currentOffset
+                    // We want: (ladderTop - price) / TICK + newOffset = centerRow
+                    // So: newOffset = centerRow - ((ladderTop - price) / TICK)
+                    // And: ((ladderTop - price) / TICK) = currentPriceRow - currentOffset
+                    this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
                     this.drawing.drawAll();
                 }
             });
@@ -3112,9 +3141,9 @@ class Chart {
             this.view.offsetX = startIndex * s;
             // Center the last candle's close price vertically at canvas center
             const lastPrice = this.lastPrice;
-            const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
-            const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
-            this.view.offsetRows = centerRow - priceRow;
+            const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+            const currentPriceRow = this.scales.priceToRowIndex(lastPrice);
+            this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
         }
         // Calculate CVD values AFTER scales and view are set
         console.log('setData: calling calculateCVD');
@@ -4039,6 +4068,7 @@ const DEFAULT_OPTIONS = {
     fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
     showHeaders: true,
     theme: DEFAULT_THEME,
+    pricePrecision: 2,
     columns: {
         bid: true,
         sold: true,
@@ -4052,7 +4082,13 @@ const DEFAULT_OPTIONS = {
 /**
  * Column definitions for the DOM.
  */
-function createColumns(theme, columnVisibility) {
+function createColumns(theme, columnVisibility, pricePrecision) {
+    const formatPrice = (price) => {
+        if (price >= 1000) {
+            return price.toLocaleString('en-US', { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision });
+        }
+        return price.toFixed(pricePrecision);
+    };
     const columns = [];
     // Bid column (left side)
     if (columnVisibility.bid) {
@@ -4151,21 +4187,19 @@ function createColumns(theme, columnVisibility) {
  * Format volume numbers for display.
  */
 function formatVolume(value) {
-    // Always show decimal format
-    if (value >= 1000) {
-        return value.toFixed(2);
+    const absValue = Math.abs(value);
+    if (absValue >= 1000000) {
+        return (value / 1000000).toFixed(2) + 'M';
+    }
+    if (absValue >= 1000) {
+        return (value / 1000).toFixed(2) + 'K';
     }
     return value.toFixed(2);
 }
 /**
  * Format price for display.
  */
-function formatPrice(price) {
-    if (price >= 1000) {
-        return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    return price.toFixed(2);
-}
+// Moved into createColumns to use dynamic pricePrecision
 /**
  * DOM (Depth of Market) component.
  * Displays a ladder-style view of order book and trade data.
@@ -4193,7 +4227,7 @@ class DOM {
             this.options.height = container.clientHeight || DEFAULT_OPTIONS.height;
         }
         // Create columns based on theme and visibility
-        this.columns = createColumns(this.options.theme, this.options.columns);
+        this.columns = createColumns(this.options.theme, this.options.columns, this.options.pricePrecision);
         // Create canvas element
         this.canvas = document.createElement('canvas');
         this.canvas.style.display = 'block';
@@ -4242,9 +4276,9 @@ class DOM {
             theme: { ...this.options.theme, ...(options.theme || {}) },
             columns: { ...this.options.columns, ...(options.columns || {}) },
         };
-        // Recreate columns if visibility changed
-        if (options.columns) {
-            this.columns = createColumns(this.options.theme, this.options.columns);
+        // Recreate columns if visibility or precision changed
+        if (options.columns || options.pricePrecision !== undefined) {
+            this.columns = createColumns(this.options.theme, this.options.columns, this.options.pricePrecision);
         }
         // Update renderer theme
         if (options.theme) {

@@ -91,11 +91,12 @@ export function drawCrosshair(
   let textColor = theme.textColor || '#aaa';
 
   if (inMainChart) {
-    // Show price with commas and 2 decimal places
+    // Show price with commas and dynamic decimal places based on tick size
     const price = scales.rowIndexToPrice(
       (crosshair.y - margin.top) / scales.rowHeightPx()
     );
-    labelText = price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const precision = scales.getPricePrecision();
+    labelText = price.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
   } else if (inOI && indicatorData && indicatorData.oiData.length > 0) {
     // Show OI value - calculate based on Y position in OI pane
     const oiMin = Math.min(...indicatorData.oiData.map(p => p.value));
@@ -212,7 +213,8 @@ export function drawCurrentPriceLabel(
 
   // Draw price label on the price bar (right side scale area)
   // Always show the label, but clamp it to the chart area bounds
-  const labelText = lastPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const precision = scales.getPricePrecision();
+  const labelText = lastPrice.toLocaleString('en-US', { minimumFractionDigits: precision, maximumFractionDigits: precision });
   ctx.font = 'bold 12px system-ui';
   const textWidth = ctx.measureText(labelText).width;
   const boxWidth = textWidth + 8;

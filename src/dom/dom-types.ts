@@ -116,6 +116,8 @@ export interface DOMOptions {
         deltaVol?: boolean;
         volume?: boolean;
     };
+    /** Number of decimal places for price display (default: 2) */
+    pricePrecision?: number;
 }
 
 /**

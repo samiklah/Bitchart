@@ -20,6 +20,7 @@ const DEFAULT_OPTIONS: Required<DOMOptions> = {
     fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
     showHeaders: true,
     theme: DEFAULT_THEME,
+    pricePrecision: 2,
     columns: {
         bid: true,
         sold: true,
@@ -34,7 +35,14 @@ const DEFAULT_OPTIONS: Required<DOMOptions> = {
 /**
  * Column definitions for the DOM.
  */
-function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOMOptions>['columns']): DOMColumn[] {
+function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOMOptions>['columns'], pricePrecision: number): DOMColumn[] {
+    const formatPrice = (price: number): string => {
+        if (price >= 1000) {
+            return price.toLocaleString('en-US', { minimumFractionDigits: pricePrecision, maximumFractionDigits: pricePrecision });
+        }
+        return price.toFixed(pricePrecision);
+    };
+
     const columns: DOMColumn[] = [];
 
     // Bid column (left side)
@@ -141,9 +149,12 @@ function createColumns(theme: Required<DOMTheme>, columnVisibility: Required<DOM
  * Format volume numbers for display.
  */
 function formatVolume(value: number): string {
-    // Always show decimal format
-    if (value >= 1000) {
-        return value.toFixed(2);
+    const absValue = Math.abs(value);
+    if (absValue >= 1000000) {
+        return (value / 1000000).toFixed(2) + 'M';
+    }
+    if (absValue >= 1000) {
+        return (value / 1000).toFixed(2) + 'K';
     }
     return value.toFixed(2);
 }
@@ -151,12 +162,7 @@ function formatVolume(value: number): string {
 /**
  * Format price for display.
  */
-function formatPrice(price: number): string {
-    if (price >= 1000) {
-        return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    return price.toFixed(2);
-}
+// Moved into createColumns to use dynamic pricePrecision
 
 /**
  * DOM (Depth of Market) component.
@@ -194,7 +200,7 @@ export class DOM {
         }
 
         // Create columns based on theme and visibility
-        this.columns = createColumns(this.options.theme as Required<DOMTheme>, this.options.columns);
+        this.columns = createColumns(this.options.theme as Required<DOMTheme>, this.options.columns, this.options.pricePrecision);
 
         // Create canvas element
         this.canvas = document.createElement('canvas');
@@ -254,9 +260,9 @@ export class DOM {
             columns: { ...this.options.columns, ...(options.columns || {}) },
         };
 
-        // Recreate columns if visibility changed
-        if (options.columns) {
-            this.columns = createColumns(this.options.theme as Required<DOMTheme>, this.options.columns);
+        // Recreate columns if visibility or precision changed
+        if (options.columns || options.pricePrecision !== undefined) {
+            this.columns = createColumns(this.options.theme as Required<DOMTheme>, this.options.columns, this.options.pricePrecision);
         }
 
         // Update renderer theme

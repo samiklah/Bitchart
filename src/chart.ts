@@ -92,22 +92,41 @@ export class Chart {
       }
     }
 
-    // Find the most common smallest difference
+    // Find the most frequent difference (Mode) to avoid selecting noise (e.g. 1e-8)
     if (priceDifferences.size === 0) return 10;
 
-    const sortedDiffs = Array.from(priceDifferences).sort((a, b) => a - b);
-    const smallestDiff = sortedDiffs[0];
-
-    // For crypto data, ensure tick size is reasonable (at least 0.1 for most pairs)
-    // If detected tick is too small, round up to a reasonable value
-    if (smallestDiff < 0.1) {
-      // Round to nearest 0.1, 0.5, or 1.0
-      if (smallestDiff < 0.25) return 0.1;
-      if (smallestDiff < 0.75) return 0.5;
-      return 1.0;
+    const diffCounts = new Map<number, number>();
+    for (const d of priceDifferences) {
+      // Group similar diffs to handle slight float variance
+      let found = false;
+      for (const [existing, count] of diffCounts) {
+        if (Math.abs(existing - d) < 1e-9) {
+          diffCounts.set(existing, count + 1);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        diffCounts.set(d, 1);
+      }
     }
 
-    return smallestDiff; // Return the smallest detected tick size
+    let bestDiff = 1;
+    let maxCount = 0;
+
+    // Sort by count descending, then by value (prefer smaller common tick for precision)
+    for (const [diff, count] of diffCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestDiff = diff;
+      } else if (count === maxCount && diff < bestDiff) {
+        bestDiff = diff;
+      }
+    }
+
+    return bestDiff;
+
+
   }
   private readonly BASE_CANDLE = 15;
   private readonly BASE_BOX = 55;
@@ -645,9 +664,14 @@ export class Chart {
           this.view.offsetX = startIndex * s;
           // Center the last candle's close price vertically at canvas center
           const lastPrice = this.lastPrice!;
-          const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
-          const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
-          this.view.offsetRows = centerRow - priceRow;
+          const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+          const currentPriceRow = this.scales.priceToRowIndex(lastPrice);
+          // Calculate the new offset required to place the price at centerRow
+          // priceToRowIndex returns: (ladderTop - price) / TICK + currentOffset
+          // We want: (ladderTop - price) / TICK + newOffset = centerRow
+          // So: newOffset = centerRow - ((ladderTop - price) / TICK)
+          // And: ((ladderTop - price) / TICK) = currentPriceRow - currentOffset
+          this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
           this.drawing.drawAll();
         }
       });
@@ -972,9 +996,9 @@ export class Chart {
       this.view.offsetX = startIndex * s;
       // Center the last candle's close price vertically at canvas center
       const lastPrice = this.lastPrice!;
-      const centerRow = (this.options.height / 2) / this.scales.rowHeightPx();
-      const priceRow = this.scales.priceToRowIndex(lastPrice); // with current offsetRows=0
-      this.view.offsetRows = centerRow - priceRow;
+      const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+      const currentPriceRow = this.scales.priceToRowIndex(lastPrice);
+      this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
     }
 
     // Calculate CVD values AFTER scales and view are set

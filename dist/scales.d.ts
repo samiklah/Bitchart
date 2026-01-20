@@ -113,6 +113,11 @@ export declare class Scales {
         y: number;
     }>;
     formatK(v: number): string;
+    /**
+     * Returns the number of decimal places to use for price formatting based on TICK size.
+     * E.g., TICK=0.01 -> 2, TICK=0.0001 -> 4, TICK=10 -> 0
+     */
+    getPricePrecision(): number;
     private get xShift();
     screenXToDataIndex(screenX: number): number;
     screenXToExactDataIndex(screenX: number): number;

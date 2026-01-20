@@ -30,10 +30,14 @@ export function drawFootprintBoxes(
 
   for (let r = 0; r < rows.length; r++) {
     const f = rows[r];
+    // Snap to nearest integer row index to prevent sub-pixel gaps
     const row = scales.priceToRowIndex(f.price);
     const yTop = scales.rowToY(row - 0.5);
     const yBot = scales.rowToY(row + 0.5);
-    const h = Math.max(1, yBot - yTop);
+    // Ensure height is at least 1px and perfectly fills the gap
+    // Use slightly larger height (ceil) or exact calculation to overlap safely
+    const h = scales.rowToY(row + 0.5) - scales.rowToY(row - 0.5);
+
     minRow = Math.min(minRow, row - 0.5);
     maxRow = Math.max(maxRow, row + 0.5);
     totBuy += f.buy;
@@ -43,11 +47,13 @@ export function drawFootprintBoxes(
     // Only draw if the row is visible (within chart bounds)
     const margin = scales.getMargin();
     const chartBottom = margin.top + scales.chartHeight();
+
+    // Draw with slight overlap to prevent cracks
     if (yTop >= margin.top && yBot <= chartBottom) {
       ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : sellRGBA(f.sell);
-      ctx.fillRect(leftX, yTop, scales.scaledBox(), h);
+      ctx.fillRect(leftX, yTop - 0.5, scales.scaledBox(), h + 1); // Add 1px overlap
       ctx.fillStyle = isPOC ? (theme.pocColor || '#808080') : buyRGBA(f.buy);
-      ctx.fillRect(rightX, yTop, scales.scaledBox(), h);
+      ctx.fillRect(rightX, yTop - 0.5, scales.scaledBox(), h + 1); // Add 1px overlap
     }
   }
 
@@ -78,10 +84,11 @@ export function drawDeltaFootprintBoxes(
 
   for (let r = 0; r < rows.length; r++) {
     const f = rows[r];
+    // Snap to nearest integer row index
     const row = scales.priceToRowIndex(f.price);
     const yTop = scales.rowToY(row - 0.5);
     const yBot = scales.rowToY(row + 0.5);
-    const h = Math.max(1, yBot - yTop);
+    const h = scales.rowToY(row + 0.5) - scales.rowToY(row - 0.5);
     minRow = Math.min(minRow, row - 0.5);
     maxRow = Math.max(maxRow, row + 0.5);
     totBuy += f.buy;
@@ -98,51 +105,26 @@ export function drawDeltaFootprintBoxes(
       // Calculate bar width based on Total Volume relative to max in this candle
       // Available width is effectively the whole slot minus margin/wick
       // But scaledBox() returns the width of ONE SIDE (approx 55px).
-      // We want to use the full available width on the right of the wick.
-      // Wick is at leftX + scaledCandle()/2.
-      // Space extends to leftX + scaledCandle()/2 + scaledBox().
-      const barWidth = (total / maxTotalVol) * barMaxWidth;
+      // For delta footprint, we use space from center line to right.
 
-      // Color based on Delta
-      const isPos = delta >= 0;
-      const color = isPos ? (theme.deltaPositive || '#16a34a') : (theme.deltaNegative || '#dc2626');
+      const width = (Math.abs(delta) / maxAbsDelta) * barMaxWidth;
 
-      // Opacity based on Delta magnitude relative to max delta
-      // Base opacity 0.3, max 1.0
-      const opacity = 0.3 + 0.7 * (Math.abs(delta) / maxAbsDelta);
+      // Draw bar extending from center (leftX) towards right
+      ctx.fillStyle = delta >= 0 ?
+        (theme.upColor || '#22c55e') :
+        (theme.downColor || '#ef4444');
 
-      ctx.fillStyle = color;
-      ctx.globalAlpha = opacity;
+      ctx.fillRect(leftX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
 
-      // Draw main bar on the right side
-      // rightX is the right edge of the candle body
-      ctx.fillRect(rightX, yTop, barWidth, h);
-
-      ctx.globalAlpha = 1.0; // Reset alpha
-
-      // Draw Delta Value Text
-      if (scales.shouldShowCellText()) {
-        const fontSize = Math.max(8, Math.min(16, 11 * zoomX));
-        ctx.font = `${fontSize}px system-ui`;
+      // Optional: Draw text overlay if height is sufficient
+      if (scales.rowHeightPx() > 10) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px sans-serif';
         ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = theme.textColorBright || '#ddd';
-
-        // Draw text slightly inside or outside depending on width? 
-        // Request said: "show only the delta on the right side of each candle, with bars"
-        // Let's put text just to the right of the bar start, or centered in bar if wide enough?
-        // Standard approach: Text overlaying the bar
-        if (barWidth > 20) {
-          ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
-        } else {
-          // If bar is too small, maybe draw outside? Or just draw anyway?
-          // Let's draw it anyway, usually fine.
-          ctx.fillText(scales.formatK(delta), rightX + 2, yTop + h / 2);
-        }
+        ctx.fillText(delta.toString(), leftX + width + 2, scales.rowToY(row));
       }
     }
   }
-
   return { minRow, maxRow, totBuy, totSell };
 }
 

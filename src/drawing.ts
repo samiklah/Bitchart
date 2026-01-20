@@ -953,8 +953,13 @@ export class Drawing {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
     const labels = this.scales.computePriceBarLabels();
+    const precision = this.scales.getPricePrecision();
     for (const { price, y } of labels) {
-      this.ctx.fillText(this.scales.formatK(price), right + this.margin.right / 2, y);
+      const formattedPrice = price.toLocaleString('en-US', {
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision
+      });
+      this.ctx.fillText(formattedPrice, right + this.margin.right / 2, y);
     }
 
     // Draw timeline at bottom

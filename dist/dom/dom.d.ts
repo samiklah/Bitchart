@@ -6,6 +6,9 @@
  */
 import { DOMData, DOMOptions } from './dom-types';
 /**
+ * Format price for display.
+ */
+/**
  * DOM (Depth of Market) component.
  * Displays a ladder-style view of order book and trade data.
  */

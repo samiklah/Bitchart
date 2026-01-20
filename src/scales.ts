@@ -205,7 +205,11 @@ export class Scales {
   }
 
   priceToRowIndex(price: number): number {
-    return (this.ladderTop - price) / this.TICK + this.view.offsetRows;
+    // Round the grid portion to nearest integer to eliminate floating-point drift.
+    // This ensures prices quantized at TICK intervals map to consecutive integer rows.
+    // The scroll offset (offsetRows) is added as-is to preserve smooth scrolling.
+    const gridRow = Math.round((this.ladderTop - price) / this.TICK);
+    return gridRow + this.view.offsetRows;
   }
 
   rowIndexToPrice(row: number): number {
@@ -269,13 +273,29 @@ export class Scales {
     let start = Math.ceil(pMin / stepPrice) * stepPrice;
     const out = [];
     for (let price = start; price <= pMax + 1e-6; price += stepPrice) {
-      out.push({ price: Math.round(price), y: this.priceToY(price) });
+      // Calculate decimal precision based on tick size
+      // For tick size 0.01 -> precision 2, for 0.001 -> precision 3, etc.
+      const precision = this.TICK < 1 ? Math.ceil(-Math.log10(this.TICK)) : 0;
+      const roundingFactor = Math.pow(10, precision);
+
+      // Round to appropriate precision based on tick size
+      const roundedPrice = Math.round(price * roundingFactor) / roundingFactor;
+      out.push({ price: roundedPrice, y: this.priceToY(price) });
     }
     return out;
   }
 
   formatK(v: number): string {
     return formatNumber(v);
+  }
+
+  /**
+   * Returns the number of decimal places to use for price formatting based on TICK size.
+   * E.g., TICK=0.01 -> 2, TICK=0.0001 -> 4, TICK=10 -> 0
+   */
+  getPricePrecision(): number {
+    if (this.TICK >= 1) return 0;
+    return Math.max(0, Math.ceil(-Math.log10(this.TICK)));
   }
 
   private get xShift(): number {
