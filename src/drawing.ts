@@ -142,7 +142,7 @@ export class Drawing {
     if (this.scales.oiHeight() > 0) this.drawOI();
     if (this.scales.fundingRateHeight() > 0) this.drawFundingRate();
     if (this.showDeltaTable) this.drawDeltaTable();
-    drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
+    drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme, this.data);
     this.drawScales(width, height);
     drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
     if (this.crosshair.visible) drawCrosshair(this.ctx, width, height, this.margin, this.crosshair, this.scales, this.data, this.theme, {

@@ -1268,9 +1268,25 @@ function drawCurrentPriceLabel(ctx, width, lastPrice, margin, scales, theme) {
  * Handles drawing of measurement rectangles and associated data labels.
  */
 /**
+ * Helper to format duration in human readable format
+ */
+function formatDuration(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0)
+        return `${days}d ${hours % 24}h`;
+    if (hours > 0)
+        return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0)
+        return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
+}
+/**
  * Draws the measurement rectangle and associated data labels.
  */
-function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
+function drawMeasureRectangle(ctx, measureRectangle, scales, theme, data) {
     if (!measureRectangle)
         return;
     ctx.save();
@@ -1287,11 +1303,20 @@ function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
     // Calculate price and time differences using current screen positions
     const startPrice = scales.screenYToPrice(startY);
     const endPrice = scales.screenYToPrice(endY);
-    const startIndex = scales.screenXToDataIndex(startX);
-    const endIndex = scales.screenXToDataIndex(endX);
+    // Use exact indices for data lookup
+    const startIndex = Math.max(0, Math.min(data.length - 1, scales.screenXToDataIndex(startX)));
+    const endIndex = Math.max(0, Math.min(data.length - 1, scales.screenXToDataIndex(endX)));
     const priceDiff = endPrice - startPrice;
-    const timeDiff = endIndex - startIndex;
+    const barsDiff = endIndex - startIndex; // Use derived variable for clarity
     const isPositive = priceDiff >= 0;
+    // Calculate Time Duration
+    let timeDurationStr = '';
+    if (data.length > 0) {
+        const startTime = new Date(data[startIndex].time).getTime();
+        const endTime = new Date(data[endIndex].time).getTime();
+        const durationMs = Math.abs(endTime - startTime);
+        timeDurationStr = formatDuration(durationMs);
+    }
     // Draw light green/red rectangle
     const rectColor = isPositive ? 'rgba(22, 163, 74, 0.2)' : 'rgba(220, 38, 38, 0.2)'; // Light green/red
     ctx.fillStyle = rectColor;
@@ -1310,9 +1335,8 @@ function drawMeasureRectangle(ctx, measureRectangle, scales, theme) {
     const priceText = `${priceSign}${priceDiff.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`;
     const startPriceText = `Start: ${startPrice.toFixed(2)}`;
     const endPriceText = `End: ${endPrice.toFixed(2)}`;
-    const timeSign = timeDiff >= 0 ? '+' : '';
-    const timeText = `ΔT: ${timeSign}${timeDiff} bars`;
-    const lines = [priceText, startPriceText, endPriceText, timeText];
+    const barsText = `${Math.abs(barsDiff)} bars (${timeDurationStr})`;
+    const lines = [priceText, barsText, startPriceText, endPriceText];
     // Bigger font
     ctx.font = '14px system-ui';
     const lineHeight = 18;
@@ -1422,7 +1446,7 @@ class Drawing {
             this.drawFundingRate();
         if (this.showDeltaTable)
             this.drawDeltaTable();
-        drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme);
+        drawMeasureRectangle(this.ctx, this.interactions.getMeasureRectangle(), this.scales, this.theme, this.data);
         this.drawScales(width, height);
         drawCurrentPriceLabel(this.ctx, width, this.lastPrice, this.margin, this.scales, this.theme);
         if (this.crosshair.visible)
