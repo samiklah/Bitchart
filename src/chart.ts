@@ -480,6 +480,8 @@ export class Chart {
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 0.55,
       initialZoomY: options.initialZoomY || 0.55,
+      minZoom: options.minZoom || 1e-6,
+      maxZoom: options.maxZoom || 100,
       margin: options.margin || this.margin,
       theme: options.theme || {},
       tableRowVisibility: options.tableRowVisibility || {
@@ -574,7 +576,8 @@ export class Chart {
         }
       },
       this.crosshair,
-      this.scales
+      this.scales,
+      { min: this.options.minZoom ?? 1e-6, max: this.options.maxZoom ?? 100 }
     );
 
     this.drawing = new Drawing(
@@ -695,6 +698,23 @@ export class Chart {
             showVolumeFootprint: true,
             footprintStyle: mode as 'bid_ask' | 'delta'
           });
+        }
+
+        // Auto-reset view to show latest data
+        if (this.data.length > 0) {
+          const s = this.scales.scaledSpacing();
+          const contentW = this.options.width - this.margin.left - this.margin.right;
+          const visibleCount = Math.ceil(contentW / s);
+          const startIndex = Math.max(0, this.data.length - visibleCount);
+          this.view.offsetX = startIndex * s;
+
+          // Center the last candle's close price vertically
+          if (this.lastPrice) {
+            const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+            const currentPriceRow = this.scales.priceToRowIndex(this.lastPrice);
+            this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
+          }
+          this.drawing.drawAll();
         }
       });
     }

@@ -19,6 +19,7 @@ export class Interactions {
   private momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
   private readonly PAN_INVERT = { x: true, y: false };
   private scales: Scales;
+  private zoomLimits: { min: number, max: number };
 
   // CVD resize state
   private isDraggingCvdDivider = false;
@@ -46,7 +47,8 @@ export class Interactions {
     view: { zoomY: number; zoomX: number; offsetRows: number; offsetX: number },
     events: VFCEvents & { onCvdResize?: (ratio: number) => void },
     crosshair: { x: number; y: number; visible: boolean },
-    scales: Scales
+    scales: Scales,
+    zoomLimits: { min: number, max: number } = { min: 1e-6, max: 100 }
   ) {
     this.canvas = canvas;
     this.margin = margin;
@@ -54,6 +56,7 @@ export class Interactions {
     this.events = events;
     this.crosshair = crosshair;
     this.scales = scales;
+    this.zoomLimits = zoomLimits;
     this.setupMouseTracking();
   }
 
@@ -77,17 +80,17 @@ export class Interactions {
 
     if (overPriceBar) {
       this.view.zoomY *= (e.deltaY < 0 ? 1.1 : 0.9);
-      this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+      this.view.zoomY = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, this.view.zoomY));
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
       this.clearMeasureRectangle();
     } else if (overChartBody) {
       const prev = this.view.zoomX;
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-      const next = Math.max(0.1, Math.min(8, prev * factor));
+      const next = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, prev * factor));
       this.view.zoomX = next;
       // Reduce price axis zoom sensitivity for smoother transitions
       this.view.zoomY *= Math.pow(factor, 0.7);
-      this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+      this.view.zoomY = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, this.view.zoomY));
       // Adjust offsetX to keep the same startIndex (prevent scrolling)
       this.view.offsetX *= (next / prev);
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
@@ -96,7 +99,7 @@ export class Interactions {
       // Timeline zoom: same mechanism as chart but only affects X axis
       const prev = this.view.zoomX;
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-      const next = Math.max(0.1, Math.min(8, prev * factor));
+      const next = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, prev * factor));
       this.view.zoomX = next;
       this.view.offsetX *= (next / prev);
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);

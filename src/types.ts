@@ -128,6 +128,10 @@ export interface VFCOptions {
   initialZoomX?: number;
   /** Initial vertical zoom level (price axis). Default: 0.55 */
   initialZoomY?: number;
+  /** Minimum zoom level. Default: 1e-6 */
+  minZoom?: number;
+  /** Maximum zoom level. Default: 100 */
+  maxZoom?: number;
   /** Margin configuration for chart layout */
   margin?: {
     /** Top margin in pixels */

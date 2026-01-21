@@ -154,17 +154,23 @@ export function drawCrosshair(
   let timeStr = '--:--';
   if (index >= 0 && index < data.length && data[index]) {
     const date = new Date(data[index].time);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
-    timeStr = `${hours}:${minutes}`;
+    timeStr = `${day}/${month} ${hours}:${minutes}`;
   }
 
   ctx.fillStyle = theme.scaleBackground || '#111';
-  ctx.fillRect(crosshair.x - 20, yBottom, 40, margin.bottom);
-  ctx.strokeStyle = theme.scaleBorder || '#444';
-  ctx.strokeRect(crosshair.x - 20, yBottom, 40, margin.bottom);
-  ctx.fillStyle = theme.textColor || '#aaa';
   ctx.font = '11px system-ui';
+  const textWidth = ctx.measureText(timeStr).width;
+  const boxWidth = textWidth + 12; // Add padding
+  const halfBox = boxWidth / 2;
+
+  ctx.fillRect(crosshair.x - halfBox, yBottom, boxWidth, margin.bottom);
+  ctx.strokeStyle = theme.scaleBorder || '#444';
+  ctx.strokeRect(crosshair.x - halfBox, yBottom, boxWidth, margin.bottom);
+  ctx.fillStyle = theme.textColor || '#aaa';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(timeStr, crosshair.x, yBottom + margin.bottom / 2);

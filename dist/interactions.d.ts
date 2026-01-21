@@ -17,6 +17,7 @@ export declare class Interactions {
     private momentum;
     private readonly PAN_INVERT;
     private scales;
+    private zoomLimits;
     private isDraggingCvdDivider;
     private cvdDividerHitZone;
     private isDraggingTableDivider;
@@ -47,7 +48,10 @@ export declare class Interactions {
         x: number;
         y: number;
         visible: boolean;
-    }, scales: Scales);
+    }, scales: Scales, zoomLimits?: {
+        min: number;
+        max: number;
+    });
     /**
      * Handles mouse wheel events for zooming different chart areas.
      * Zooms price axis when over price bar, time axis when over timeline, both when over chart body.

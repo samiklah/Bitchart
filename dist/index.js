@@ -224,17 +224,17 @@
         /** Returns the scaled spacing between candles, depending on volume footprint mode. */
         scaledSpacing() {
             if (!this.showVolumeFootprint) {
-                return (10 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
+                return (6 + 1) * this.view.zoomX; // Candle width + 1px gap when volume footprint is off
             }
             if (this.footprintStyle === 'delta') {
                 // Reduced spacing for delta mode (only right-side bars)
                 // BASE_CANDLE (15) + BASE_BOX (55) + GAP (~5-10)
                 return 75 * this.view.zoomX;
             }
-            return 132 * this.view.zoomX; // Standard spacing (Candle + 2 * Box + gaps)
+            return 128 * this.view.zoomX; // Standard spacing (Candle + 2 * Box + gaps)
         }
         scaledCandle() {
-            return 10 * this.view.zoomX; // BASE_CANDLE * zoomX
+            return 6 * this.view.zoomX; // BASE_CANDLE * zoomX
         }
         scaledBox() {
             return 55 * this.view.zoomX; // BASE_BOX * zoomX
@@ -411,7 +411,7 @@
          * @param crosshair Crosshair position state
          * @param scales Scales instance for coordinate conversions
          */
-        constructor(canvas, margin, view, events, crosshair, scales) {
+        constructor(canvas, margin, view, events, crosshair, scales, zoomLimits = { min: 1e-6, max: 100 }) {
             this.momentum = { raf: 0, vx: 0, lastTs: 0, active: false };
             this.PAN_INVERT = { x: true, y: false };
             // CVD resize state
@@ -428,6 +428,7 @@
             this.events = events;
             this.crosshair = crosshair;
             this.scales = scales;
+            this.zoomLimits = zoomLimits;
             this.setupMouseTracking();
         }
         /**
@@ -449,18 +450,18 @@
             const overChartBody = !overPriceBar && !overTimeline;
             if (overPriceBar) {
                 this.view.zoomY *= (e.deltaY < 0 ? 1.1 : 0.9);
-                this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+                this.view.zoomY = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, this.view.zoomY));
                 (_b = (_a = this.events).onZoom) === null || _b === void 0 ? void 0 : _b.call(_a, this.view.zoomX, this.view.zoomY);
                 this.clearMeasureRectangle();
             }
             else if (overChartBody) {
                 const prev = this.view.zoomX;
                 const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-                const next = Math.max(0.1, Math.min(8, prev * factor));
+                const next = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, prev * factor));
                 this.view.zoomX = next;
                 // Reduce price axis zoom sensitivity for smoother transitions
                 this.view.zoomY *= Math.pow(factor, 0.7);
-                this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+                this.view.zoomY = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, this.view.zoomY));
                 // Adjust offsetX to keep the same startIndex (prevent scrolling)
                 this.view.offsetX *= (next / prev);
                 (_d = (_c = this.events).onZoom) === null || _d === void 0 ? void 0 : _d.call(_c, this.view.zoomX, this.view.zoomY);
@@ -470,7 +471,7 @@
                 // Timeline zoom: same mechanism as chart but only affects X axis
                 const prev = this.view.zoomX;
                 const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-                const next = Math.max(0.1, Math.min(8, prev * factor));
+                const next = Math.max(this.zoomLimits.min, Math.min(this.zoomLimits.max, prev * factor));
                 this.view.zoomX = next;
                 this.view.offsetX *= (next / prev);
                 (_f = (_e = this.events).onZoom) === null || _f === void 0 ? void 0 : _f.call(_e, this.view.zoomX, this.view.zoomY);
@@ -778,13 +779,32 @@
      * Draws the footprint with delta bars (Delta Volume mode).
      */
     function drawDeltaFootprintBoxes(ctx, rows, leftX, rightX, scales, theme, zoomX) {
-        Math.max(...rows.map(f => f.buy + f.sell), 1);
+        const maxTotalVol = Math.max(...rows.map(f => f.buy + f.sell), 1);
         // Calculate max abs delta for color intensity
         const maxAbsDelta = Math.max(...rows.map(f => Math.abs(f.buy - f.sell)), 1);
         // Available width for the bar (right side of candle)
         const barMaxWidth = scales.scaledBox(); // Use the standard box width as max width
         let minRow = Infinity, maxRow = -Infinity;
         let totBuy = 0, totSell = 0;
+        // Helper to convert hex to rgb for opacity handling
+        const hexToRgb = (hex) => {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        };
+        const getRgba = (color, opacity) => {
+            // Basic hex support
+            if (color.startsWith('#')) {
+                const rgb = hexToRgb(color);
+                if (rgb)
+                    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
+            }
+            // Fallback if not hex or conversion failed
+            return color;
+        };
         for (let r = 0; r < rows.length; r++) {
             const f = rows[r];
             // Snap to nearest integer row index
@@ -796,28 +816,29 @@
             maxRow = Math.max(maxRow, row + 0.5);
             totBuy += f.buy;
             totSell += f.sell;
-            f.buy + f.sell;
+            const total = f.buy + f.sell;
             const delta = f.buy - f.sell;
             // Only draw if visible
             const margin = scales.getMargin();
             const chartBottom = margin.top + scales.chartHeight();
             if (yTop >= margin.top && yBot <= chartBottom) {
-                // Calculate bar width based on Total Volume relative to max in this candle
-                // Available width is effectively the whole slot minus margin/wick
-                // But scaledBox() returns the width of ONE SIDE (approx 55px).
-                // For delta footprint, we use space from center line to right.
-                const width = (Math.abs(delta) / maxAbsDelta) * barMaxWidth;
-                // Draw bar extending from center (leftX) towards right
-                ctx.fillStyle = delta >= 0 ?
+                // Bar WIDTH represents TOTAL VOLUME relative to max volume in candle
+                const width = (total / maxTotalVol) * barMaxWidth;
+                // Color intensity represents DELTA magnitude
+                const deltaRatio = Math.abs(delta) / maxAbsDelta;
+                const opacity = 0.2 + (0.8 * deltaRatio); // 0.2 to 1.0 opacity
+                const baseColor = delta >= 0 ?
                     (theme.upColor || '#22c55e') :
                     (theme.downColor || '#ef4444');
-                ctx.fillRect(leftX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
+                ctx.fillStyle = getRgba(baseColor, opacity);
+                // Draw bar extending from center (rightX) towards right
+                ctx.fillRect(rightX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
                 // Optional: Draw text overlay if height is sufficient
                 if (scales.rowHeightPx() > 10) {
-                    ctx.fillStyle = '#fff';
+                    ctx.fillStyle = '#fff'; // Keep text white for readability
                     ctx.font = '10px sans-serif';
                     ctx.textAlign = 'left';
-                    ctx.fillText(delta.toString(), leftX + width + 2, scales.rowToY(row));
+                    ctx.fillText(scales.formatK(delta), rightX + 4, scales.rowToY(row));
                 }
             }
         }
@@ -1177,16 +1198,21 @@
         let timeStr = '--:--';
         if (index >= 0 && index < data.length && data[index]) {
             const date = new Date(data[index].time);
+            const day = date.getDate().toString().padStart(2, '0');
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
             const hours = date.getHours().toString().padStart(2, '0');
             const minutes = date.getMinutes().toString().padStart(2, '0');
-            timeStr = `${hours}:${minutes}`;
+            timeStr = `${day}/${month} ${hours}:${minutes}`;
         }
         ctx.fillStyle = theme.scaleBackground || '#111';
-        ctx.fillRect(crosshair.x - 20, yBottom, 40, margin.bottom);
-        ctx.strokeStyle = theme.scaleBorder || '#444';
-        ctx.strokeRect(crosshair.x - 20, yBottom, 40, margin.bottom);
-        ctx.fillStyle = theme.textColor || '#aaa';
         ctx.font = '11px system-ui';
+        const textWidth = ctx.measureText(timeStr).width;
+        const boxWidth = textWidth + 12; // Add padding
+        const halfBox = boxWidth / 2;
+        ctx.fillRect(crosshair.x - halfBox, yBottom, boxWidth, margin.bottom);
+        ctx.strokeStyle = theme.scaleBorder || '#444';
+        ctx.strokeRect(crosshair.x - halfBox, yBottom, boxWidth, margin.bottom);
+        ctx.fillStyle = theme.textColor || '#aaa';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(timeStr, crosshair.x, yBottom + margin.bottom / 2);
@@ -2719,6 +2745,8 @@
                 tickSize: options.tickSize || 10,
                 initialZoomX: options.initialZoomX || 0.55,
                 initialZoomY: options.initialZoomY || 0.55,
+                minZoom: options.minZoom || 1e-6,
+                maxZoom: options.maxZoom || 100,
                 margin: options.margin || this.margin,
                 theme: options.theme || {},
                 tableRowVisibility: options.tableRowVisibility || {
@@ -2760,7 +2788,7 @@
          * Initializes the chart modules (Scales, Interactions, Drawing).
          */
         initializeModules() {
-            var _a, _b, _c, _d, _e, _f;
+            var _a, _b, _c, _d, _e, _f, _g, _h;
             this.scales = new Scales(this.data, this.margin, this.view, this.options.width, this.options.height, this.showVolumeFootprint, this.TICK, this.baseRowPx, this.TEXT_VIS, this.showCVD, (_a = this.options.cvdHeightRatio) !== null && _a !== void 0 ? _a : 0.2, this.getDeltaTableHeight(), this.options.footprintStyle, this.showOI, (_b = this.options.oiHeightRatio) !== null && _b !== void 0 ? _b : 0.15, this.showFundingRate, (_c = this.options.fundingRateHeightRatio) !== null && _c !== void 0 ? _c : 0.1);
             this.interactions = new Interactions(this.canvas, this.margin, this.view, {
                 ...this.events,
@@ -2789,8 +2817,8 @@
                         this.updateOptions({ tableRowHeight });
                     }
                 }
-            }, this.crosshair, this.scales);
-            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_d = this.options.tableRowHeight) !== null && _d !== void 0 ? _d : 16, this.options.footprintStyle, this.showOI, (_e = this.options.oiHeightRatio) !== null && _e !== void 0 ? _e : 0.15, this.showFundingRate, (_f = this.options.fundingRateHeightRatio) !== null && _f !== void 0 ? _f : 0.1);
+            }, this.crosshair, this.scales, { min: (_d = this.options.minZoom) !== null && _d !== void 0 ? _d : 1e-6, max: (_e = this.options.maxZoom) !== null && _e !== void 0 ? _e : 100 });
+            this.drawing = new Drawing(this.ctx, this.data, this.margin, this.view, this.showGrid, this.showBounds, this.showVolumeFootprint, this.showVolumeHeatmap, this.volumeHeatmapDynamic, this.scales, this.options.theme, this.crosshair, this.lastPrice, this.interactions, this.cvdValues, this.showDeltaTable, this.options.tableRowVisibility, (_f = this.options.tableRowHeight) !== null && _f !== void 0 ? _f : 16, this.options.footprintStyle, this.showOI, (_g = this.options.oiHeightRatio) !== null && _g !== void 0 ? _g : 0.15, this.showFundingRate, (_h = this.options.fundingRateHeightRatio) !== null && _h !== void 0 ? _h : 0.1);
         }
         constructor(container, options = {}, events = {}) {
             this.data = [];
@@ -2927,6 +2955,21 @@
                             showVolumeFootprint: true,
                             footprintStyle: mode
                         });
+                    }
+                    // Auto-reset view to show latest data
+                    if (this.data.length > 0) {
+                        const s = this.scales.scaledSpacing();
+                        const contentW = this.options.width - this.margin.left - this.margin.right;
+                        const visibleCount = Math.ceil(contentW / s);
+                        const startIndex = Math.max(0, this.data.length - visibleCount);
+                        this.view.offsetX = startIndex * s;
+                        // Center the last candle's close price vertically
+                        if (this.lastPrice) {
+                            const centerRow = (this.scales.chartHeight() / 2) / this.scales.rowHeightPx();
+                            const currentPriceRow = this.scales.priceToRowIndex(this.lastPrice);
+                            this.view.offsetRows = centerRow - (currentPriceRow - this.view.offsetRows);
+                        }
+                        this.drawing.drawAll();
                     }
                 });
             }

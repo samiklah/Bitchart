@@ -53,6 +53,8 @@ export class VFC {
       tickSize: options.tickSize || 10,
       initialZoomX: options.initialZoomX || 1,
       initialZoomY: options.initialZoomY || 1,
+      minZoom: options.minZoom || 1e-6,
+      maxZoom: options.maxZoom || 100,
       margin: options.margin || this.margin,
       theme: options.theme || {},
       showCVD: options.showCVD ?? false,
@@ -160,24 +162,24 @@ export class VFC {
     if (overPriceBar) {
       this.cancelMomentum();
       this.view.zoomY *= (e.deltaY < 0 ? 1.1 : 0.9);
-      this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+      this.view.zoomY = Math.max(this.options.minZoom, Math.min(this.options.maxZoom, this.view.zoomY));
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
     } else if (overChartBody) {
       const prev = this.view.zoomX;
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-      const next = Math.max(0.1, Math.min(8, prev * factor));
+      const next = Math.max(this.options.minZoom, Math.min(this.options.maxZoom, prev * factor));
       this.view.zoomX = next;
       // Zoom price axis less than timeline (slower zoom)
       const yFactor = Math.pow(factor, 0.7); // Reduce the zoom factor for Y axis
       this.view.zoomY *= yFactor;
-      this.view.zoomY = Math.max(0.1, Math.min(8, this.view.zoomY));
+      this.view.zoomY = Math.max(this.options.minZoom, Math.min(this.options.maxZoom, this.view.zoomY));
       this.view.offsetX *= (next / prev);
       this.events.onZoom?.(this.view.zoomX, this.view.zoomY);
     } else if (overTimeline) {
       // Timeline zoom: same mechanism as chart but only affects X axis
       const prev = this.view.zoomX;
       const factor = (e.deltaY < 0 ? 1.1 : 0.9);
-      const next = Math.max(0.1, Math.min(8, prev * factor));
+      const next = Math.max(this.options.minZoom, Math.min(this.options.maxZoom, prev * factor));
       this.view.zoomX = next;
       // Adjust offsetX to keep the same startIndex (prevent scrolling)
       this.view.offsetX *= (next / prev);

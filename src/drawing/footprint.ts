@@ -82,6 +82,26 @@ export function drawDeltaFootprintBoxes(
   let minRow = Infinity, maxRow = -Infinity;
   let totBuy = 0, totSell = 0;
 
+  // Helper to convert hex to rgb for opacity handling
+  const hexToRgb = (hex: string): { r: number, g: number, b: number } | null => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
+  };
+
+  const getRgba = (color: string, opacity: number): string => {
+    // Basic hex support
+    if (color.startsWith('#')) {
+      const rgb = hexToRgb(color);
+      if (rgb) return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
+    }
+    // Fallback if not hex or conversion failed
+    return color;
+  };
+
   for (let r = 0; r < rows.length; r++) {
     const f = rows[r];
     // Snap to nearest integer row index
@@ -102,26 +122,28 @@ export function drawDeltaFootprintBoxes(
     const chartBottom = margin.top + scales.chartHeight();
 
     if (yTop >= margin.top && yBot <= chartBottom) {
-      // Calculate bar width based on Total Volume relative to max in this candle
-      // Available width is effectively the whole slot minus margin/wick
-      // But scaledBox() returns the width of ONE SIDE (approx 55px).
-      // For delta footprint, we use space from center line to right.
+      // Bar WIDTH represents TOTAL VOLUME relative to max volume in candle
+      const width = (total / maxTotalVol) * barMaxWidth;
 
-      const width = (Math.abs(delta) / maxAbsDelta) * barMaxWidth;
+      // Color intensity represents DELTA magnitude
+      const deltaRatio = Math.abs(delta) / maxAbsDelta;
+      const opacity = 0.2 + (0.8 * deltaRatio); // 0.2 to 1.0 opacity
 
-      // Draw bar extending from center (leftX) towards right
-      ctx.fillStyle = delta >= 0 ?
+      const baseColor = delta >= 0 ?
         (theme.upColor || '#22c55e') :
         (theme.downColor || '#ef4444');
 
-      ctx.fillRect(leftX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
+      ctx.fillStyle = getRgba(baseColor, opacity);
+
+      // Draw bar extending from center (rightX) towards right
+      ctx.fillRect(rightX, yTop - 0.5, Math.max(1, width), h + 1); // Add 1px overlap
 
       // Optional: Draw text overlay if height is sufficient
       if (scales.rowHeightPx() > 10) {
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#fff'; // Keep text white for readability
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(delta.toString(), leftX + width + 2, scales.rowToY(row));
+        ctx.fillText(scales.formatK(delta), rightX + 4, scales.rowToY(row));
       }
     }
   }
